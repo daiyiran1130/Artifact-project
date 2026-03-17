@@ -36,15 +36,6 @@ PROMPT = (
     "Do not provide any explanations, reasoning, or additional information."
 )
 
-# 合法标签集合，用于校验模型输出
-VALID_LABELS = {
-    "normal",
-    "diabetic retinopathy",
-    "macular hole",
-    "age-related macular degeneration",
-    "central serous retinopathy",
-}
-
 
 # ── 模型加载（脚本启动时执行一次，之后复用）────────────────────────────────
 print(f"Loading model: {MODEL_ID}  (this may take a while on first run)...")
@@ -120,13 +111,6 @@ def query_model(image_path: Path) -> str:
     return decoded.strip().lower()   # 去首尾空白并转小写，便于与标签集合比较
 
 
-def normalise_response(raw: str) -> str:
-    """将模型原始输出映射到合法标签；无法匹配时原样保留供排查。"""
-    for label in VALID_LABELS:
-        if label in raw:   # 子串匹配，容忍模型在标签前后多输出了文字
-            return label
-    return raw             # 完全意外的输出，保留原文
-
 
 def load_results(path: Path) -> dict:
     """加载已有结果实现断点续传；文件不存在时返回空字典。"""
@@ -187,9 +171,8 @@ def main():
         print(f"[{idx}/{len(numbered)}] Processing {img_path.name} (index {num}) ...", end=" ", flush=True)
         try:
             raw   = query_model(img_path)        # 调用本地模型推理
-            label = normalise_response(raw)      # 标准化输出
-            results[key] = label
-            print(f"-> {label}")
+            results[key] = raw
+            print(f"-> {raw}")
         except Exception as e:
             print(f"\n[ERROR] {e}")
             results[key] = f"error: {e}"
