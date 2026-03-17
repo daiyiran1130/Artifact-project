@@ -112,14 +112,6 @@ def query_model(image_path: Path) -> str:
 
 
 
-def load_results(path: Path) -> dict:
-    """加载已有结果实现断点续传；文件不存在时返回空字典。"""
-    if path.exists():
-        with open(path, "r", encoding="utf-8") as f:
-            return json.load(f)
-    return {}
-
-
 def save_results(path: Path, results: dict) -> None:
     """按编号升序将结果写入 JSON，每条记录占一行，便于按行定位。"""
     with open(path, "w", encoding="utf-8") as f:
@@ -157,16 +149,13 @@ def main():
     random.shuffle(numbered)
     print(f"Found {len(numbered)} images. Starting classification...\n")
 
-    # 4. 加载已有进度，支持中断后续跑
-    results = load_results(OUTPUT_FILE)
+    # 4. 清空 JSON，从头开始（不再断点续跑）
+    results = {}
+    save_results(OUTPUT_FILE, results)
 
     # 5. 逐张推理
     for idx, (num, img_path) in enumerate(numbered, start=1):
         key = str(num)
-
-        if key in results:   # 已处理过，跳过
-            print(f"[{idx}/{len(numbered)}] #{num} already done, skipping.")
-            continue
 
         print(f"[{idx}/{len(numbered)}] Processing {img_path.name} (index {num}) ...", end=" ", flush=True)
         try:
