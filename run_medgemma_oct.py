@@ -90,7 +90,7 @@ def save_results(path: Path, results: dict) -> None:
         items = sorted(results.items(), key=lambda kv: int(kv[0])) # 按编号（转 int）升序排序
         for i, (k, v) in enumerate(items):                         # 遍历排序后的键值对
             comma = "," if i < len(items) - 1 else ""             # 除最后一项外，行尾加逗号（合法 JSON）
-            f.write(f'  "{k}": "{v}"{comma}\n')                   # 写入一行：  "编号": "标签"
+            f.write(f'  "{k}": {json.dumps(v, ensure_ascii=False)}{comma}\n')  # 写入一行：  "编号": "标签"（自动转义换行/引号）
         f.write("}\n")                                             # 手动写闭括号
 
 
