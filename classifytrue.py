@@ -83,10 +83,14 @@ def query_model(image_path: Path) -> str:
     ).to(model.device, dtype=torch.bfloat16)  # 移至模型所在设备，并统一精度
     input_len = inputs["input_ids"].shape[-1]  # 记录输入 token 数，用于截取新生成的部分
     # 4. 关闭梯度计算（推理阶段不需要反向传播，节省显存和时间）
+    # 用模型上下文窗口减去已有输入，让模型生成到 EOS 自然停止，不人为截断
+    max_ctx = getattr(model.config, "max_position_embeddings", 8192)
+    remaining = max(1, max_ctx - input_len)
+
     with torch.inference_mode():
         generation = model.generate(
             **inputs,
-            max_new_tokens=50,    # OCT 分类只需短输出，限制 token 数加速推理
+            max_new_tokens=remaining,
             do_sample=False,      # 关闭随机采样，使用贪心解码，输出更确定
         )
     # 5. 截取新生成的 token（去掉输入部分），解码为字符串
