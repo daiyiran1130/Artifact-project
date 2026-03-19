@@ -100,7 +100,7 @@ def query_model(image_path: Path) -> str:
     with torch.inference_mode():
         generation = model.generate(
             **inputs,
-            max_new_tokens=50,    # OCT 分类只需短输出，限制 token 数加速推理
+            max_new_tokens=512,   # 给足空间，防止模型输出被截断
             do_sample=False,      # 关闭随机采样，使用贪心解码，输出更确定
         )
 
@@ -119,7 +119,7 @@ def save_results(path: Path, results: dict) -> None:
         items = sorted(results.items(), key=lambda kv: int(kv[0]))  # 按编号（int）升序
         for i, (k, v) in enumerate(items):
             comma = "," if i < len(items) - 1 else ""               # 最后一项不加逗号
-            f.write(f'  "{k}": "{v}"{comma}\n')
+            f.write(f'  "{k}": {json.dumps(v, ensure_ascii=False)}{comma}\n')
         f.write("}\n")
 
 
