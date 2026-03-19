@@ -100,7 +100,7 @@ def query_model(image_path: Path) -> str:
     with torch.inference_mode():
         generation = model.generate(
             **inputs,
-            max_new_tokens=512,   # 给足空间，防止模型输出被截断
+            max_new_tokens=2048,  # 足够保存模型的完整解释输出
             do_sample=False,      # 关闭随机采样，使用贪心解码，输出更确定
         )
 
