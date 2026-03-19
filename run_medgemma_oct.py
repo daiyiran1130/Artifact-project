@@ -33,15 +33,6 @@ PROMPT = (
     "Do not provide any explanations, reasoning, or additional information."
 )
 
-# 合法标签集合（set），用于校验模型输出是否在预期范围内
-VALID_LABELS = {
-    "normal",
-    "diabetic retinopathy",
-    "macular hole",
-    "age-related macular degeneration",
-    "central serous retinopathy",
-}
-
 
 # ── 函数定义 ────────────────────────────────────────────────────────────────
 
@@ -82,13 +73,6 @@ def query_ollama(image_path: Path) -> str:
         .lower()                           # 统一转小写，便于与标签集合比较
     )
 
-
-def normalise_response(raw: str) -> str:
-    """将模型原始输出映射到最近的合法标签；若无法匹配则原样保留，供人工排查。"""
-    for label in VALID_LABELS:
-        if label in raw:       # 检查合法标签是否是模型输出的子串（容忍多余文字）
-            return label
-    return raw                 # 模型输出完全意外时，保留原文以便调试
 
 
 def load_results(path: Path) -> dict:
@@ -152,9 +136,8 @@ def main():
         print(f"[{idx}/{len(numbered)}] Processing {img_path.name} (index {num}) ...", end=" ", flush=True)
         try:
             raw   = query_ollama(img_path)       # 调用模型，获取原始文本回复
-            label = normalise_response(raw)      # 标准化为合法标签
-            results[key] = label                 # 写入结果字典
-            print(f"-> {label}")                 # 在同一行追加结果并换行
+            results[key] = raw                   # 直接保存原始回答，不做标签归一化
+            print(f"-> {raw}")                   # 在同一行追加结果并换行
 
         except requests.exceptions.ConnectionError:
             # Ollama 未启动或端口不对，无法继续，立即终止循环
