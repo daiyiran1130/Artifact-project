@@ -12,12 +12,13 @@ calculate_accuracy.py
        CSR     → central serous retinopathy（中心性浆液性脉络膜视网膜病变）
 
   2. json 文件 —— 模型输出的分类结果，格式为以图像编号（从 1 开始）为键、
-     疾病全称为值的字典，例如：
+     疾病全称（或含疾病名称的长文本）为值的字典，例如：
        {
          "1": "normal",
-         "2": "diabetic retinopathy",
+         "2": "Based on the OCT image, the patient has diabetic retinopathy ...",
          ...
        }
+     程序会自动从长文本中提取疾病名称。若文本中包含多个疾病名称，取最先出现的一个。
 
 输出：
   - 总体准确度（Overall Accuracy）
@@ -41,6 +42,52 @@ LABEL_MAP = {
     "AMRD":   "age-related macular degeneration", # 年龄相关性黄斑变性
     "CSR":    "central serous retinopathy",      # 中心性浆液性脉络膜视网膜病变
 }
+
+# 所有合法的疾病全称，按长度从长到短排列。
+# 优先匹配长字符串，防止 "normal" 误匹配 "age-related macular degeneration" 等
+# 包含 "normal" 子串的情况（实际上不存在，但保持此顺序是良好实践）。
+DISEASE_NAMES = sorted(LABEL_MAP.values(), key=len, reverse=True)
+
+
+def extract_disease(text):
+    """
+    从任意长度的文本中提取疾病名称。
+
+    匹配规则：
+      - 忽略大小写
+      - 按疾病名称从长到短依次搜索，取文本中最先出现的匹配项
+      - 若文本本身就是合法疾病名（精确匹配），直接返回，不做搜索
+
+    参数：
+        text (str): 模型输出的原始字符串，可以是疾病名或含疾病名的长句。
+
+    返回：
+        str: 匹配到的疾病全称（小写），如 "normal"、"macular hole" 等。
+
+    异常：
+        ValueError: 文本中找不到任何已知疾病名称时抛出。
+    """
+    text_lower = text.strip().lower()
+
+    # 快速路径：文本本身就是合法疾病名，直接返回
+    if text_lower in DISEASE_NAMES:
+        return text_lower
+
+    # 在文本中搜索每个疾病名称出现的位置，记录 (位置, 疾病名) 对
+    matches = []
+    for disease in DISEASE_NAMES:
+        pos = text_lower.find(disease)
+        if pos != -1:
+            matches.append((pos, disease))
+
+    if not matches:
+        raise ValueError(
+            f"无法从以下文本中提取疾病名称，请检查模型输出：\n  '{text}'"
+        )
+
+    # 取最先出现（位置最小）的匹配结果
+    matches.sort(key=lambda x: x[0])
+    return matches[0][1]
 
 
 def load_ground_truth(xlsx_path):
@@ -71,22 +118,35 @@ def load_ground_truth(xlsx_path):
 
 def load_predictions(json_path):
     """
-    从 json 文件读取模型的预测结果。
+    从 json 文件读取模型的预测结果，并从每条文本中提取疾病名称。
 
-    json 文件格式要求：键为图像编号字符串（从 "1" 开始），值为疾病全称字符串。
-    例如：{"1": "normal", "2": "diabetic retinopathy", ...}
+    json 文件格式要求：键为图像编号字符串（从 "1" 开始），值为模型输出的文本
+    （可以是疾病全称，也可以是含疾病名称的长文本）。
+    例如：
+      {"1": "normal", "2": "Based on the image, the diagnosis is macular hole ..."}
 
     参数：
         json_path (str): json 文件路径。
 
     返回：
-        list[str]: 按图像编号从小到大排列的预测标签列表。
+        list[str]: 按图像编号从小到大排列的预测标签列表（均为标准疾病全称）。
+
+    异常：
+        ValueError: 某条文本中无法提取到已知疾病名称时抛出，并提示对应编号。
     """
     with open(json_path, "r", encoding="utf-8") as f:
         raw = json.load(f)
 
     # json 中的键为字符串，需转为整数后排序，确保顺序与 xlsx 行顺序一致
-    predictions = [raw[str(k)] for k in sorted(raw.keys(), key=lambda x: int(x))]
+    predictions = []
+    for k in sorted(raw.keys(), key=lambda x: int(x)):
+        text = raw[str(k)]
+        try:
+            disease = extract_disease(text)
+        except ValueError as e:
+            raise ValueError(f"图像编号 {k}：{e}") from e
+        predictions.append(disease)
+
     return predictions
 
 
