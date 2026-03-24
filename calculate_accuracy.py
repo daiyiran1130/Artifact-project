@@ -30,6 +30,7 @@ calculate_accuracy.py
 """
 
 import json
+import re
 import argparse
 import pandas as pd
 
@@ -90,6 +91,60 @@ def extract_disease(text):
     return matches[0][1]
 
 
+def _parse_json_with_fallback(json_path):
+    """
+    读取 JSON 文件，若标准解析失败则启用正则表达式兜底解析。
+
+    兜底场景：模型输出的长文本中包含未转义的双引号、换行符等特殊字符，
+    导致 JSON 格式损坏，标准 json.load() 抛出 JSONDecodeError。
+
+    兜底策略：
+      用正则从文件原始文本中逐条提取 "编号": "任意内容" 的键值对。
+      匹配规则为：找到数字键后，将其后的内容一直读到下一个数字键或文件结尾，
+      再从这段内容中直接提取疾病名称，绕过 JSON 字符串边界问题。
+
+    参数：
+        json_path (str): JSON 文件路径。
+
+    返回：
+        dict: {编号字符串: 原始文本字符串} 的字典。
+
+    异常：
+        ValueError: 兜底解析也未能提取到任何条目时抛出。
+    """
+    with open(json_path, "r", encoding="utf-8") as f:
+        raw_text = f.read()
+
+    # 第一步：尝试标准 JSON 解析
+    try:
+        return json.loads(raw_text)
+    except json.JSONDecodeError as e:
+        print(f"[警告] JSON 格式有误（{e}），启用正则兜底解析……")
+
+    # 第二步：正则兜底
+    # 匹配 "数字" : " ... " 结构，值部分跨行贪婪匹配至下一个 "数字" 键或文件末尾
+    # 直接用 [\s\S]*? 非贪婪匹配两个键之间的所有内容（包含换行）
+    pattern = re.compile(
+        r'"(\d+)"\s*:\s*"([\s\S]*?)"'   # 匹配 "key": "value"
+        r'(?=\s*(?:,\s*"\d+"|\s*\}))',   # 向前断言：后面跟着下一个键或 }
+    )
+    matches = pattern.findall(raw_text)
+
+    if not matches:
+        # 更宽松的备用正则：直接在数字键之间切割，不依赖闭合引号
+        # 每段切割后再用 extract_disease 从原始文本中提取疾病名
+        chunk_pattern = re.compile(r'"(\d+)"\s*:\s*"([\s\S]*?)"', re.MULTILINE)
+        matches = chunk_pattern.findall(raw_text)
+
+    if not matches:
+        raise ValueError(
+            "标准 JSON 解析与正则兜底均失败，请手动检查 JSON 文件格式。"
+        )
+
+    print(f"[信息] 正则兜底解析成功，共提取到 {len(matches)} 条记录。")
+    return {k: v for k, v in matches}
+
+
 def load_ground_truth(xlsx_path):
     """
     从 xlsx 文件读取人工标注的正确标签。
@@ -134,8 +189,8 @@ def load_predictions(json_path):
     异常：
         ValueError: 某条文本中无法提取到已知疾病名称时抛出，并提示对应编号。
     """
-    with open(json_path, "r", encoding="utf-8") as f:
-        raw = json.load(f)
+    # 使用兜底解析：JSON 格式损坏时自动切换为正则提取
+    raw = _parse_json_with_fallback(json_path)
 
     # json 中的键为字符串，需转为整数后排序，确保顺序与 xlsx 行顺序一致
     predictions = []
