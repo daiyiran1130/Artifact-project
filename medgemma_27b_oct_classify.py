@@ -1,11 +1,17 @@
 """
 OCT image classification — batch over all artifact sub-folders.
 Model: google/medgemma-27b-it (27B, 4-bit quantized via bitsandbytes)
+
+Download the model first:
+  huggingface-cli download google/medgemma-27b-it \\
+      --local-dir /root/autodl-tmp/medgemma-27b-it \\
+      --local-dir-use-symlinks False
 """
 import os
-os.environ["MODELSCOPE_CACHE"]   = "/root/autodl-tmp/modelscope_cache"
+# 确保 HF/transformers 缓存写到大磁盘，不会把根目录撤爆
 os.environ["HF_HOME"]            = "/root/autodl-tmp/hf_cache"
 os.environ["TRANSFORMERS_CACHE"] = "/root/autodl-tmp/hf_cache"
+os.environ["MODELSCOPE_CACHE"]   = "/root/autodl-tmp/modelscope_cache"
 
 import re
 import json
@@ -15,9 +21,10 @@ import torch
 from PIL import Image
 
 # ── 全局配置 ──────────────────────────────────────────────────────────────
-ARTIFACT_DIR   = Path("/root/autodl-tmp/artifact")
-MODELSCOPE_CACHE = Path("/root/autodl-tmp/modelscope_cache")
-MODEL_NAME     = "medgemma-27b-it"
+ARTIFACT_DIR = Path("/root/autodl-tmp/artifact")
+
+# huggingface-cli 下载路径（直接目录，不经 modelscope cache 层级）
+MODEL_PATH = Path("/root/autodl-tmp/medgemma-27b-it")
 
 PROMPT = (
     "You are an ophthalmology expert.  \n"
@@ -29,59 +36,19 @@ PROMPT = (
     "Describe your reasoning in steps."
 )
 
-# ── 自动定位模型目录 ──────────────────────────────────────────────────────
-def find_model_path(cache_root: Path, model_name: str) -> Path:
-    """
-    在 ModelScope 缓存目录下搜索模型实际存放路径。
-    ModelScope 常用目录结构：
-      {cache}/google/{model_name}/
-      {cache}/{model_name}/
-      {cache}/hub/google/{model_name}/     (旧版 ModelScope)
-    """
-    candidates = [
-        cache_root / "google" / model_name,
-        cache_root / model_name,
-        cache_root / "hub" / "google" / model_name,
-        cache_root / "hub" / model_name,
-    ]
-    for p in candidates:
-        if p.is_dir() and any(p.iterdir()):   # 非空目录
-            print(f"  [FOUND] {p}")
-            return p
-
-    # 递归搜索，覆盖更多情况
-    print(f"  Searching recursively under {cache_root} for '{model_name}' ...")
-    matches = [p for p in cache_root.rglob(f"*{model_name}*") if p.is_dir()]
-    if matches:
-        print(f"  Candidates found:")
-        for m in matches:
-            print(f"    {m}")
-        # 选较深的那个（包含 config.json 的目录优先）
-        with_config = [m for m in matches if (m / "config.json").exists()]
-        best = with_config[0] if with_config else matches[0]
-        print(f"  Using: {best}")
-        return best
-
-    # 找不到，列出 cache 下所有子目录供参考
-    print(f"\n[ERROR] Model '{model_name}' not found under {cache_root}")
-    print("  Contents of cache root:")
-    try:
-        for item in sorted(cache_root.iterdir()):
-            print(f"    {item}")
-    except Exception:
-        pass
-    raise FileNotFoundError(
-        f"Cannot find model directory for '{model_name}' under {cache_root}.\n"
-        "Please confirm the model has been downloaded and check the path above."
-    )
-
-
-print(f"Locating model '{MODEL_NAME}' ...")
-MODEL_PATH = find_model_path(MODELSCOPE_CACHE, MODEL_NAME)
-print(f"Model path         : {MODEL_PATH}")
+# ── 模型加载 ──────────────────────────────────────────────────────────────
+print(f"Loading model from : {MODEL_PATH}")
 print(f"Directory exists   : {MODEL_PATH.is_dir()}")
 
-# ── 模型加载 ──────────────────────────────────────────────────────────────
+if not MODEL_PATH.is_dir():
+    raise FileNotFoundError(
+        f"{MODEL_PATH} does not exist.\n"
+        "Please download the model first:\n"
+        "  huggingface-cli download google/medgemma-27b-it "
+        "--local-dir /root/autodl-tmp/medgemma-27b-it "
+        "--local-dir-use-symlinks False"
+    )
+
 from transformers import AutoProcessor, BitsAndBytesConfig
 
 # 27B 模型显存需求约50GB (bfloat16)，使用4-bit 量化降至 ~14GB
