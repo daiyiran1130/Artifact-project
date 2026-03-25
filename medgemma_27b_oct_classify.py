@@ -1,8 +1,8 @@
 """
 OCT image classification — batch over all artifact sub-folders.
 Model: google/medgemma-27b-it (27B, 4-bit quantized via bitsandbytes)
-Fix: local_files_only=True 强制走本地路径逻辑，解决新版 huggingface_hub 将
-     多级目录路径误判为 Hub repo ID 的问题。
+Fix: 将路径传为 pathlib.Path 对象而非字符串，绕过新版 huggingface_hub
+     对字符串格式 repo ID 的校验逻辑。
 """
 import os
 os.environ["MODELSCOPE_CACHE"]   = "/root/autodl-tmp/modelscope_cache"
@@ -19,9 +19,8 @@ from PIL import Image
 # ── 全局配置 ──────────────────────────────────────────────────────────────
 ARTIFACT_DIR = Path("/root/autodl-tmp/artifact")
 
-MODEL_ID = os.path.abspath(
-    "/root/autodl-tmp/modelscope_cache/google/medgemma-27b-it"
-)
+# 使用 Path 对象，绕过 huggingface_hub 对字符串格式的 repo ID 校验
+MODEL_PATH = Path("/root/autodl-tmp/modelscope_cache/google/medgemma-27b-it")
 
 PROMPT = (
     "You are an ophthalmology expert.  \n"
@@ -34,8 +33,8 @@ PROMPT = (
 )
 
 # ── 模型加载 ──────────────────────────────────────────────────────────────
-print(f"Loading model from : {MODEL_ID}")
-print(f"Directory exists   : {os.path.isdir(MODEL_ID)}")
+print(f"Loading model from : {MODEL_PATH}")
+print(f"Directory exists   : {MODEL_PATH.is_dir()}")
 
 from transformers import AutoProcessor, BitsAndBytesConfig
 
@@ -47,15 +46,12 @@ bnb_config = BitsAndBytesConfig(
     bnb_4bit_use_double_quant=True,
 )
 
-# local_files_only=True: 强制走本地路径逻辑，
-# 解决新版 huggingface_hub 将包含多级目录的本地路径误判为 Hub repo ID 的问题
 try:
     from transformers import AutoModelForImageTextToText
     model = AutoModelForImageTextToText.from_pretrained(
-        MODEL_ID,
+        MODEL_PATH,
         quantization_config=bnb_config,
         device_map="auto",
-        local_files_only=True,
     )
     print("Loaded via AutoModelForImageTextToText")
 except Exception as e1:
@@ -63,10 +59,9 @@ except Exception as e1:
     try:
         from transformers import Gemma3ForConditionalGeneration
         model = Gemma3ForConditionalGeneration.from_pretrained(
-            MODEL_ID,
+            MODEL_PATH,
             quantization_config=bnb_config,
             device_map="auto",
-            local_files_only=True,
         )
         print("Loaded via Gemma3ForConditionalGeneration")
     except Exception as e2:
@@ -75,7 +70,7 @@ except Exception as e1:
             "Please check that the path is correct and the model files exist."
         )
 
-processor = AutoProcessor.from_pretrained(MODEL_ID, local_files_only=True)
+processor = AutoProcessor.from_pretrained(MODEL_PATH)
 print("Model loaded.\n")
 
 # ── 工具函数 ──────────────────────────────────────────────────────────────
