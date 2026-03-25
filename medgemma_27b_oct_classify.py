@@ -1,8 +1,8 @@
 """
 OCT image classification — batch over all artifact sub-folders.
 Model: google/medgemma-27b-it (27B, 4-bit quantized via bitsandbytes)
-Fix: use os.path.abspath() so transformers receives a genuine filesystem path
-     and falls back to Gemma3ForConditionalGeneration if Auto class fails.
+Fix: local_files_only=True 强制走本地路径逻辑，解决新版 huggingface_hub 将
+     多级目录路径误判为 Hub repo ID 的问题。
 """
 import os
 os.environ["MODELSCOPE_CACHE"]   = "/root/autodl-tmp/modelscope_cache"
@@ -19,7 +19,6 @@ from PIL import Image
 # ── 全局配置 ──────────────────────────────────────────────────────────────
 ARTIFACT_DIR = Path("/root/autodl-tmp/artifact")
 
-# os.path.abspath 确保返回真实绝对路径字符串，规避 transformers 对路径的校验
 MODEL_ID = os.path.abspath(
     "/root/autodl-tmp/modelscope_cache/google/medgemma-27b-it"
 )
@@ -34,7 +33,7 @@ PROMPT = (
     "Describe your reasoning in steps."
 )
 
-# ── 模型加载（全局只加载一次，所有文件夹复用）──────────────────────────────────
+# ── 模型加载 ──────────────────────────────────────────────────────────────
 print(f"Loading model from : {MODEL_ID}")
 print(f"Directory exists   : {os.path.isdir(MODEL_ID)}")
 
@@ -48,13 +47,15 @@ bnb_config = BitsAndBytesConfig(
     bnb_4bit_use_double_quant=True,
 )
 
-# 优先用 AutoModelForImageTextToText，失败则回退到 Gemma3ForConditionalGeneration
+# local_files_only=True: 强制走本地路径逻辑，
+# 解决新版 huggingface_hub 将包含多级目录的本地路径误判为 Hub repo ID 的问题
 try:
     from transformers import AutoModelForImageTextToText
     model = AutoModelForImageTextToText.from_pretrained(
         MODEL_ID,
         quantization_config=bnb_config,
         device_map="auto",
+        local_files_only=True,
     )
     print("Loaded via AutoModelForImageTextToText")
 except Exception as e1:
@@ -65,6 +66,7 @@ except Exception as e1:
             MODEL_ID,
             quantization_config=bnb_config,
             device_map="auto",
+            local_files_only=True,
         )
         print("Loaded via Gemma3ForConditionalGeneration")
     except Exception as e2:
@@ -73,7 +75,7 @@ except Exception as e1:
             "Please check that the path is correct and the model files exist."
         )
 
-processor = AutoProcessor.from_pretrained(MODEL_ID)
+processor = AutoProcessor.from_pretrained(MODEL_ID, local_files_only=True)
 print("Model loaded.\n")
 
 # ── 工具函数 ──────────────────────────────────────────────────────────────
