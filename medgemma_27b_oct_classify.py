@@ -3,9 +3,8 @@ OCT image classification — batch over all artifact sub-folders.
 Model: google/medgemma-27b-it (27B, 4-bit quantized via bitsandbytes)
 
 Download the model first:
-  huggingface-cli download google/medgemma-27b-it \\
-      --local-dir /root/autodl-tmp/medgemma-27b-it \\
-      --local-dir-use-symlinks False
+  modelscope download --model google/medgemma-27b-it \\
+      --cache_dir /root/autodl-tmp/modelscope_cache
 """
 import os
 # 确保 HF/transformers 缓存写到大磁盘，不会把根目录撤爆
@@ -22,9 +21,7 @@ from PIL import Image
 
 # ── 全局配置 ──────────────────────────────────────────────────────────────
 ARTIFACT_DIR = Path("/root/autodl-tmp/artifact")
-
-# huggingface-cli 下载路径（直接目录，不经 modelscope cache 层级）
-MODEL_PATH = Path("/root/autodl-tmp/medgemma-27b-it")
+MODEL_PATH   = Path("/root/autodl-tmp/modelscope_cache/google/medgemma-27b-it")
 
 PROMPT = (
     "You are an ophthalmology expert.  \n"
@@ -44,9 +41,8 @@ if not MODEL_PATH.is_dir():
     raise FileNotFoundError(
         f"{MODEL_PATH} does not exist.\n"
         "Please download the model first:\n"
-        "  huggingface-cli download google/medgemma-27b-it "
-        "--local-dir /root/autodl-tmp/medgemma-27b-it "
-        "--local-dir-use-symlinks False"
+        "  modelscope download --model google/medgemma-27b-it "
+        "--cache_dir /root/autodl-tmp/modelscope_cache"
     )
 
 from transformers import AutoProcessor, BitsAndBytesConfig
