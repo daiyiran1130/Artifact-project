@@ -99,7 +99,6 @@ def query_model(image_path: Path) -> str:
     with torch.inference_mode():
         generation = model.generate(
             **inputs,
-            max_new_tokens=20,    # 眼底分类只需短输出，限制 token 数加速推理
             do_sample=False,      # 关闭随机采样，使用贪心解码，输出更确定
         )
 
