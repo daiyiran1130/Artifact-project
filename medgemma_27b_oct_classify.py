@@ -4,13 +4,12 @@ Model: google/medgemma-27b-it (27B, 4-bit quantized via bitsandbytes)
 
 Download the model first:
   modelscope download --model google/medgemma-27b-it \\
-      --cache_dir /root/autodl-pub/modelscope_cache
+      --cache_dir /root/autodl-tmp/modelscope_cache
 """
 import os
-# 确保 HF/transformers 缓存写到大磁盘，不会把根目录撤爆
-os.environ["HF_HOME"]            = "/root/autodl-pub/hf_cache"
-os.environ["TRANSFORMERS_CACHE"] = "/root/autodl-pub/hf_cache"
-os.environ["MODELSCOPE_CACHE"]   = "/root/autodl-pub/modelscope_cache"
+os.environ["HF_HOME"]            = "/root/autodl-tmp/hf_cache"
+os.environ["TRANSFORMERS_CACHE"] = "/root/autodl-tmp/hf_cache"
+os.environ["MODELSCOPE_CACHE"]   = "/root/autodl-tmp/modelscope_cache"
 
 import re
 import json
@@ -21,7 +20,7 @@ from PIL import Image
 
 # ── 全局配置 ──────────────────────────────────────────────────────────────
 ARTIFACT_DIR = Path("/root/autodl-tmp/artifact")
-MODEL_PATH   = Path("/root/autodl-pub/modelscope_cache/google/medgemma-27b-it")
+MODEL_PATH   = Path("/root/autodl-tmp/modelscope_cache/google/medgemma-27b-it")
 
 PROMPT = (
     "You are an ophthalmology expert.  \n"
@@ -42,12 +41,11 @@ if not MODEL_PATH.is_dir():
         f"{MODEL_PATH} does not exist.\n"
         "Please download the model first:\n"
         "  modelscope download --model google/medgemma-27b-it "
-        "--cache_dir /root/autodl-pub/modelscope_cache"
+        "--cache_dir /root/autodl-tmp/modelscope_cache"
     )
 
 from transformers import AutoProcessor, BitsAndBytesConfig
 
-# 27B 模型显存需求约50GB (bfloat16)，使用4-bit 量化降至 ~14GB
 bnb_config = BitsAndBytesConfig(
     load_in_4bit=True,
     bnb_4bit_quant_type="nf4",
