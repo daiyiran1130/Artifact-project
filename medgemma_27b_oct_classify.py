@@ -22,9 +22,9 @@ from PIL import Image
 ARTIFACT_DIR = Path("/root/autodl-tmp/artifact")
 MODEL_PATH   = Path("/root/autodl-tmp/modelscope_cache/google/medgemma-27b-it")
 
-# Pro 6000 显存 48GB，4-bit 模型占纩14GB，剩余约34GB可用于 batch
+# RTX PRO 6000 显存 96GB，4-bit 模型占纩14GB，剩余约82GB可用于 batch
 # 如果 OOM 可适当减小
-BATCH_SIZE = 4
+BATCH_SIZE = 8
 
 PROMPT = (
     "You are an ophthalmology expert.  \n"
@@ -215,7 +215,6 @@ def process_folder(image_dir: Path) -> None:
                 results[str(num)] = raw
                 print(f"    {num} -> {raw[:80]}")
         except torch.cuda.OutOfMemoryError:
-            # OOM 时逑退到单张处理
             print(f"  [OOM] Falling back to single-image inference for this batch.")
             torch.cuda.empty_cache()
             for num, img_path in zip(batch_nums, batch_paths):
