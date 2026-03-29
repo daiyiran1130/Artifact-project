@@ -1,11 +1,15 @@
 """
-Color fundus image classification — batch over all artifact-color sub-folders.
+Color fundus image classification — 3-prompt experiment over all artifact-color sub-folders.
 Model: google/medgemma-27b-it (27B, 4-bit quantized via bitsandbytes)
 
 Folders processed under /root/autodl-tmp/artifact-color/:
   mediumcolor, mediumlight, strongblur, weakblur, weakcolor, weaklight
 
-Results saved as {folder_name}.json inside each sub-folder.
+For each prompt (1/2/3) and each folder, results are saved as:
+  {folder}/{prompt_idx}_{folder_name}.json
+  e.g. mediumcolor/1_mediumcolor.json
+
+All model output is stored as-is (no token limit, no truncation).
 
 Download the model first:
   modelscope download --model google/medgemma-27b-it \\
@@ -23,15 +27,17 @@ from pathlib import Path
 import torch
 from PIL import Image
 
-# ── 全局配置 ──────────────────────────────────────────────────────
+# ── 全局配置 ──────────────────────────────────────────────────────────────
 ARTIFACT_DIR = Path("/root/autodl-tmp/artifact-color")
 MODEL_PATH   = Path("/root/autodl-tmp/modelscope_cache/google/medgemma-27b-it")
 
-# RTX PRO 6000 显存96GB，4-bit 模型占约14GB，剩余约82GB可用于 batch
-# 彩色眼底图分辨率较高，batch_size=8 适当；如果 OOM 可减小为 4
+# RTX PRO 6000 显存 96GB，4-bit 模型占约 14GB，剩余约 82GB 可用于 batch
+# 提示词 3 会生成较长的推理链，如遇 OOM 可将 BATCH_SIZE 减小为 4
 BATCH_SIZE = 8
 
-PROMPT = (
+# ── 3 种实验提示词 ────────────────────────────────────────────────────────
+# Prompt 1：严格限制只输出类别名，不做任何解释
+PROMPT_1 = (
     "You are an ophthalmology expert.\n"
     "You are given a color fundus image.\n"
     "Classify the image into one of the following categories:\n"
@@ -41,7 +47,32 @@ PROMPT = (
     "This classification is for research reference only, not for clinical diagnosis."
 )
 
-# ── 模型加载 ──────────────────────────────────────────────────────
+# Prompt 2：要求分类，但不限制输出格式，允许模型自由作答
+PROMPT_2 = (
+    "You are an ophthalmology expert.\n"
+    "You are given a color fundus image.\n"
+    "Classify the image into one of the following categories:\n"
+    "\"Normal\", \"Diabetic Retinopathy\", \"Age-related Macular Degeneration\", \"Glaucoma\".\n"
+    "This classification is for research reference only, not for clinical diagnosis."
+)
+
+# Prompt 3：要求分步推理后给出分类结论
+PROMPT_3 = (
+    "You are an ophthalmology expert.\n"
+    "You are given a color fundus image.\n"
+    "Classify the image into one of the following categories:\n"
+    "\"Normal\", \"Diabetic Retinopathy\", \"Age-related Macular Degeneration\", \"Glaucoma\".\n"
+    "This classification is for research reference only, not for clinical diagnosis.\n"
+    "Describe your reasoning in steps."
+)
+
+PROMPTS = {
+    1: PROMPT_1,
+    2: PROMPT_2,
+    3: PROMPT_3,
+}
+
+# ── 模型加载 ──────────────────────────────────────────────────────────────
 print(f"Loading model from : {MODEL_PATH}")
 print(f"Directory exists   : {MODEL_PATH.is_dir()}")
 
@@ -91,21 +122,25 @@ processor = AutoProcessor.from_pretrained(MODEL_PATH)
 processor.tokenizer.padding_side = "left"
 print("Model loaded.\n")
 
-# ── 工具函数 ──────────────────────────────────────────────────────
+
+# ── 工具函数 ──────────────────────────────────────────────────────────────
 def extract_number(filename: str) -> int | None:
     stem  = Path(filename).stem
     match = re.search(r"\d+", stem)
     return int(match.group()) if match else None
 
 
-def query_model_batch(image_paths: list) -> list:
-    """batch_size 张图片一次前向传播，返回同数量的结果字符串列表。"""
+def query_model_batch(image_paths: list, prompt: str) -> list:
+    """
+    batch_size 张图片一次前向传播，返回同数量的结果字符串列表。
+    不限制 max_new_tokens，保存模型完整输出。
+    """
     images = [Image.open(p).convert("RGB") for p in image_paths]
 
     all_messages = [
         [{"role": "user", "content": [
             {"type": "image", "image": img},
-            {"type": "text",  "text": PROMPT},
+            {"type": "text",  "text": prompt},
         ]}]
         for img in images
     ]
@@ -120,30 +155,30 @@ def query_model_batch(image_paths: list) -> list:
     ).to(model.device, dtype=torch.bfloat16)
 
     input_len = inputs["input_ids"].shape[-1]
-    # 彩色眼底图分类只需输出类别名，限制 max_new_tokens 加快推理
-    MAX_NEW_TOKENS = 30
+    max_ctx   = getattr(model.config, "max_position_embeddings", 8192)
+    remaining = max(1, max_ctx - input_len)   # 不截断，用满剩余上下文窗口
 
     with torch.inference_mode():
         generations = model.generate(
             **inputs,
-            max_new_tokens=MAX_NEW_TOKENS,
+            max_new_tokens=remaining,
             do_sample=False,
         )
 
     results = []
     for gen in generations:
         new_tokens = gen[input_len:]
-        decoded = processor.decode(new_tokens, skip_special_tokens=True)
-        results.append(decoded.strip())
+        decoded    = processor.decode(new_tokens, skip_special_tokens=True)
+        results.append(decoded.strip())   # 保留原始大小写，不做任何截断
     return results
 
 
-def query_model_single(image_path: Path) -> str:
-    """OOM 时的单张图片回退。"""
+def query_model_single(image_path: Path, prompt: str) -> str:
+    """OOM 时的单张图片回退，同样不限制输出长度。"""
     image = Image.open(image_path).convert("RGB")
     messages = [{"role": "user", "content": [
         {"type": "image", "image": image},
-        {"type": "text",  "text": PROMPT},
+        {"type": "text",  "text": prompt},
     ]}]
     inputs = processor.apply_chat_template(
         messages,
@@ -154,12 +189,13 @@ def query_model_single(image_path: Path) -> str:
     ).to(model.device, dtype=torch.bfloat16)
 
     input_len = inputs["input_ids"].shape[-1]
-    MAX_NEW_TOKENS = 30
+    max_ctx   = getattr(model.config, "max_position_embeddings", 8192)
+    remaining = max(1, max_ctx - input_len)
 
     with torch.inference_mode():
         generation = model.generate(
             **inputs,
-            max_new_tokens=MAX_NEW_TOKENS,
+            max_new_tokens=remaining,
             do_sample=False,
         )
     new_tokens = generation[0][input_len:]
@@ -167,72 +203,60 @@ def query_model_single(image_path: Path) -> str:
 
 
 def save_results(path: Path, results: dict) -> None:
+    """按编号升序写入 JSON，每条记录占一行。"""
     with open(path, "w", encoding="utf-8") as f:
         f.write("{\n")
         items = sorted(results.items(), key=lambda kv: int(kv[0]))
         for i, (k, v) in enumerate(items):
             comma = "," if i < len(items) - 1 else ""
-            f.write(f'  "{k}": {json.dumps(v)}{comma}\n')
+            f.write(f'  "{k}": {json.dumps(v, ensure_ascii=False)}{comma}\n')
         f.write("}\n")
 
 
-def process_folder(image_dir: Path) -> None:
-    # JSON 文件用文件夹名命名，存在该文件夹内
-    output_file = image_dir / f"{image_dir.name}.json"
+def process_folder(image_dir: Path, prompt_idx: int, prompt: str,
+                   numbered: list) -> None:
+    """
+    对同一组图片（numbered）用指定 prompt 做推理，
+    结果写入 {image_dir}/{prompt_idx}_{image_dir.name}.json。
+    """
+    output_file = image_dir / f"{prompt_idx}_{image_dir.name}.json"
+    print(f"  Output -> {output_file}")
 
-    image_files = (
-        list(image_dir.glob("*.jpg"))
-        + list(image_dir.glob("*.jpeg"))
-        + list(image_dir.glob("*.png"))
-    )
-
-    if not image_files:
-        print(f"  [SKIP] No images found in {image_dir}\n")
-        return
-
-    numbered = []
-    for p in image_files:
-        n = extract_number(p.name)
-        if n is not None:
-            numbered.append((n, p))
-        else:
-            print(f"  [SKIP] Cannot extract number from: {p.name}")
-
-    if not numbered:
-        print(f"  [SKIP] No files with numeric IDs in {image_dir}\n")
-        return
-
-    random.shuffle(numbered)
-    print(f"  Found {len(numbered)} images. Batch size = {BATCH_SIZE}. Starting classification...")
+    # 每次实验前重新打乱顺序（各 prompt 顺序独立随机）
+    shuffled = numbered[:]
+    random.shuffle(shuffled)
 
     results = {}
     save_results(output_file, results)
 
-    total = len(numbered)
+    total = len(shuffled)
     idx   = 0
     while idx < total:
-        batch       = numbered[idx: idx + BATCH_SIZE]
+        batch       = shuffled[idx: idx + BATCH_SIZE]
         batch_nums  = [n for n, _ in batch]
         batch_paths = [p for _, p in batch]
         idx        += len(batch)
 
-        print(f"  [{idx}/{total}] Processing {len(batch)} image(s): "
+        print(f"  [{idx}/{total}] {len(batch)} image(s): "
               f"{[p.name for p in batch_paths]} ...", flush=True)
 
         try:
-            raw_list = query_model_batch(batch_paths)
+            raw_list = query_model_batch(batch_paths, prompt)
             for num, raw in zip(batch_nums, raw_list):
                 results[str(num)] = raw
-                print(f"    {num} -> {raw}")
+                # 打印前 120 字符预览，完整内容已写入 JSON
+                preview = raw[:120].replace("\n", " ")
+                print(f"    {num} -> {preview}{'...' if len(raw) > 120 else ''}")
         except torch.cuda.OutOfMemoryError:
-            print(f"  [OOM] Falling back to single-image inference for this batch.")
+            print("  [OOM] Falling back to single-image inference for this batch.")
             torch.cuda.empty_cache()
             for num, img_path in zip(batch_nums, batch_paths):
                 print(f"    {img_path.name} ...", end=" ", flush=True)
                 try:
-                    raw = query_model_single(img_path)
+                    raw = query_model_single(img_path, prompt)
                     results[str(num)] = raw
-                    print(f"-> {raw}")
+                    preview = raw[:120].replace("\n", " ")
+                    print(f"-> {preview}{'...' if len(raw) > 120 else ''}")
                 except Exception as e:
                     print(f"\n    [ERROR] {e}")
                     results[str(num)] = f"error: {e}"
@@ -246,35 +270,66 @@ def process_folder(image_dir: Path) -> None:
     print(f"  Saved {len(results)} results -> {output_file}\n")
 
 
-# ── 主流程 ─────────────────────────────────────────────────────────────
+# ── 主流程 ────────────────────────────────────────────────────────────────
 def main():
-    # 按字母顺序依次处理指定的 6 个子文件夹
-    TARGET_FOLDERS = ["mediumcolor", "mediumlight", "strongblur", "weakblur", "weakcolor", "weaklight"]
+    TARGET_FOLDERS = ["mediumcolor", "mediumlight", "strongblur",
+                      "weakblur", "weakcolor", "weaklight"]
 
-    targets = []
+    # 预先收集每个文件夹的图片列表（3 个 prompt 共用同一批图片）
+    folder_images: dict[Path, list] = {}
     for name in TARGET_FOLDERS:
         folder = ARTIFACT_DIR / name
-        if folder.is_dir():
-            targets.append(folder)
-        else:
+        if not folder.is_dir():
             print(f"[WARNING] Folder not found, skipping: {folder}")
+            continue
 
-    if not targets:
-        print(f"No target folders found under {ARTIFACT_DIR}")
+        image_files = (
+            list(folder.glob("*.jpg"))
+            + list(folder.glob("*.jpeg"))
+            + list(folder.glob("*.png"))
+        )
+        numbered = []
+        for p in image_files:
+            n = extract_number(p.name)
+            if n is not None:
+                numbered.append((n, p))
+            else:
+                print(f"  [SKIP] Cannot extract number from: {p.name}")
+
+        if numbered:
+            folder_images[folder] = numbered
+        else:
+            print(f"[SKIP] No valid images in {folder}")
+
+    if not folder_images:
+        print(f"No valid folders found under {ARTIFACT_DIR}")
         return
 
-    print(f"Found {len(targets)} folder(s) to process:")
-    for t in targets:
-        print(f"  {t}")
+    print(f"Folders to process : {[f.name for f in folder_images]}")
+    print(f"Prompts            : {list(PROMPTS.keys())}")
+    print(f"Batch size         : {BATCH_SIZE}")
     print()
 
-    for folder_idx, image_dir in enumerate(targets, start=1):
-        print(f"{'='*60}")
-        print(f"[{folder_idx}/{len(targets)}] Processing: {image_dir}")
-        print(f"{'='*60}")
-        process_folder(image_dir)
+    # 外层：按提示词编号（1 → 2 → 3）；内层：按文件夹顺序
+    total_runs  = len(PROMPTS) * len(folder_images)
+    run_counter = 0
 
-    print("All folders done.")
+    for prompt_idx, prompt in PROMPTS.items():
+        print(f"{'#'*60}")
+        print(f"  PROMPT {prompt_idx}/{len(PROMPTS)}")
+        print(f"{'#'*60}\n")
+
+        for folder_idx, (image_dir, numbered) in enumerate(
+                folder_images.items(), start=1):
+            run_counter += 1
+            print(f"{'='*60}")
+            print(f"[Run {run_counter}/{total_runs}] "
+                  f"Prompt {prompt_idx}  |  Folder: {image_dir.name} "
+                  f"({len(numbered)} images)")
+            print(f"{'='*60}")
+            process_folder(image_dir, prompt_idx, prompt, numbered)
+
+    print("All experiments done.")
 
 
 if __name__ == "__main__":
