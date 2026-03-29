@@ -193,14 +193,38 @@ def print_report(stats: dict) -> None:
         print(f"  {lbl:<10} {info['correct']:>8} {info['total']:>8} {info['accuracy']:>10.4f}")
 
 
+OUTPUT_RESULTS = RESULTS_DIR / "culresults.json"
+
+
+def build_output_record(stats: dict) -> dict:
+    """将单个文件的统计结果整理为要写入 culresults.json 的格式。"""
+    return {
+        "overall_accuracy": round(stats["overall_accuracy"], 6),
+        "overall_correct":  stats["overall_correct"],
+        "overall_total":    stats["overall_total"],
+        "unparseable":      stats["unparseable"],
+        "per_class": {
+            lbl: {
+                "accuracy": round(info["accuracy"], 6),
+                "correct":  info["correct"],
+                "total":    info["total"],
+            }
+            for lbl, info in stats["per_class"].items()
+        },
+    }
+
+
 def main():
     # Load ground-truth labels
     print(f"Loading labels from {LABEL_FILE} ...")
     labels = load_labels(LABEL_FILE)
     print(f"Loaded {len(labels)} labels.")
 
-    # Find all JSON result files
-    json_files = sorted(RESULTS_DIR.glob("*.json"))
+    # Find all JSON result files, skip culresults.json itself
+    json_files = sorted(
+        p for p in RESULTS_DIR.glob("*.json")
+        if p.name != OUTPUT_RESULTS.name
+    )
     if not json_files:
         print(f"No JSON files found in {RESULTS_DIR}")
         return
@@ -208,10 +232,18 @@ def main():
     print(f"Found {len(json_files)} result files in {RESULTS_DIR}")
 
     all_stats = []
+    output = {}  # {filename: accuracy_record}
+
     for json_path in json_files:
         stats = evaluate_file(json_path, labels)
         print_report(stats)
         all_stats.append(stats)
+        output[json_path.name] = build_output_record(stats)
+
+    # ── 保存到 culresults.json ───────────────────────────────────────────────
+    with open(OUTPUT_RESULTS, "w", encoding="utf-8") as f:
+        json.dump(output, f, ensure_ascii=False, indent=2)
+    print(f"\nResults saved to {OUTPUT_RESULTS}")
 
     # ── Summary across all files ─────────────────────────────────────────────
     if len(all_stats) > 1:
@@ -219,7 +251,6 @@ def main():
         print("  SUMMARY ACROSS ALL FILES")
         print(f"{'='*60}")
 
-        # Aggregate per-class over all files
         agg_class: dict[str, list[int]] = {lbl: [0, 0] for lbl in LABEL_TO_KEYWORDS}
         agg_correct = 0
         agg_total   = 0
@@ -244,7 +275,6 @@ def main():
             acc = correct / total if total > 0 else 0.0
             print(f"  {lbl:<10} {correct:>8} {total:>8} {acc:>10.4f}")
 
-        # Per-file overall accuracy table
         print(f"\n  Per-file overall accuracy:")
         print(f"  {'File':<40} {'Accuracy':>10}")
         print(f"  {'-'*52}")
