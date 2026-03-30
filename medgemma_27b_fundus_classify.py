@@ -1,9 +1,9 @@
 """
-Color fundus image classification — 3-prompt experiment over all artifact-color sub-folders.
+Color fundus image classification — 3-prompt experiment over all artifact sub-folders.
 Model: google/medgemma-27b-it (27B, 4-bit quantized via bitsandbytes)
 
 Folder structure expected:
-  /root/autodl-tmp/artifact-color/{folder_name}/nolabel/*.jpg
+  /root/autodl-tmp/artifact/{folder_name}/nolabel/*.jpg
 
 For each prompt (1/2/3) and each folder, results are saved as:
   {folder}/{prompt_idx}_{folder_name}.json
@@ -28,7 +28,7 @@ import torch
 from PIL import Image
 
 # ── 全局配置 ─────────────────────────────────────────────────────────────
-ARTIFACT_DIR = Path("/root/autodl-tmp/artifact-color")
+ARTIFACT_DIR = Path("/root/autodl-tmp/artifact")
 MODEL_PATH   = Path("/root/autodl-tmp/modelscope_cache/google/medgemma-27b-it")
 
 # RTX PRO 6000 显存 96GB，4-bit 模型占约 14GB，剩余约 82GB 可用于 batch
@@ -195,7 +195,7 @@ def query_model_single(image_path: Path, prompt: str) -> str:
 
 
 def save_results(path: Path, results: dict) -> None:
-    """ 按编号升序写入 JSON，每条记录占一行。"""
+    """按编号升序写入 JSON，每条记录占一行。"""
     with open(path, "w", encoding="utf-8") as f:
         f.write("{\n")
         items = sorted(results.items(), key=lambda kv: int(kv[0]))
@@ -268,7 +268,7 @@ def main():
     # 预先收集每个文件夹的图片（从 nolabel 子目录读取）
     folder_images: dict[Path, list] = {}
     for name in TARGET_FOLDERS:
-        folder     = ARTIFACT_DIR / name
+        folder      = ARTIFACT_DIR / name
         nolabel_dir = folder / "nolabel"
 
         if not folder.is_dir():
