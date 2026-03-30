@@ -2,8 +2,8 @@
 Color fundus image classification — 3-prompt experiment over all artifact-color sub-folders.
 Model: google/medgemma-27b-it (27B, 4-bit quantized via bitsandbytes)
 
-Folders processed under /root/autodl-tmp/artifact-color/:
-  mediumcolor, mediumlight, strongblur, weakblur, weakcolor, weaklight
+Folder structure expected:
+  /root/autodl-tmp/artifact-color/{folder_name}/nolabel/*.jpg
 
 For each prompt (1/2/3) and each folder, results are saved as:
   {folder}/{prompt_idx}_{folder_name}.json
@@ -27,16 +27,15 @@ from pathlib import Path
 import torch
 from PIL import Image
 
-# ── 全局配置 ──────────────────────────────────────────────────────────────
+# ── 全局配置 ─────────────────────────────────────────────────────────────
 ARTIFACT_DIR = Path("/root/autodl-tmp/artifact-color")
 MODEL_PATH   = Path("/root/autodl-tmp/modelscope_cache/google/medgemma-27b-it")
 
 # RTX PRO 6000 显存 96GB，4-bit 模型占约 14GB，剩余约 82GB 可用于 batch
-# 提示词 3 会生成较长的推理链，如遇 OOM 可将 BATCH_SIZE 减小为 4
+# Prompt 3 会生成较长的推理链，如遇 OOM 可将 BATCH_SIZE 减小为 4
 BATCH_SIZE = 8
 
-# ── 3 种实验提示词 ────────────────────────────────────────────────────────
-# Prompt 1：严格限制只输出类别名，不做任何解释
+# ── 3 种实验提示词 ───────────────────────────────────────────────────────
 PROMPT_1 = (
     "You are an ophthalmology expert.\n"
     "You are given a color fundus image.\n"
@@ -47,7 +46,6 @@ PROMPT_1 = (
     "This classification is for research reference only, not for clinical diagnosis."
 )
 
-# Prompt 2：要求分类，但不限制输出格式，允许模型自由作答
 PROMPT_2 = (
     "You are an ophthalmology expert.\n"
     "You are given a color fundus image.\n"
@@ -56,7 +54,6 @@ PROMPT_2 = (
     "This classification is for research reference only, not for clinical diagnosis."
 )
 
-# Prompt 3：要求分步推理后给出分类结论
 PROMPT_3 = (
     "You are an ophthalmology expert.\n"
     "You are given a color fundus image.\n"
@@ -66,13 +63,9 @@ PROMPT_3 = (
     "Describe your reasoning in steps."
 )
 
-PROMPTS = {
-    1: PROMPT_1,
-    2: PROMPT_2,
-    3: PROMPT_3,
-}
+PROMPTS = {1: PROMPT_1, 2: PROMPT_2, 3: PROMPT_3}
 
-# ── 模型加载 ──────────────────────────────────────────────────────────────
+# ── 模型加载 ─────────────────────────────────────────────────────────────
 print(f"Loading model from : {MODEL_PATH}")
 print(f"Directory exists   : {MODEL_PATH.is_dir()}")
 
@@ -118,12 +111,11 @@ except Exception as e1:
         )
 
 processor = AutoProcessor.from_pretrained(MODEL_PATH)
-# batch 生成必须用 left padding
-processor.tokenizer.padding_side = "left"
+processor.tokenizer.padding_side = "left"   # batch 生成必须 left padding
 print("Model loaded.\n")
 
 
-# ── 工具函数 ──────────────────────────────────────────────────────────────
+# ── 工具函数 ─────────────────────────────────────────────────────────────
 def extract_number(filename: str) -> int | None:
     stem  = Path(filename).stem
     match = re.search(r"\d+", stem)
@@ -156,7 +148,7 @@ def query_model_batch(image_paths: list, prompt: str) -> list:
 
     input_len = inputs["input_ids"].shape[-1]
     max_ctx   = getattr(model.config, "max_position_embeddings", 8192)
-    remaining = max(1, max_ctx - input_len)   # 不截断，用满剩余上下文窗口
+    remaining = max(1, max_ctx - input_len)
 
     with torch.inference_mode():
         generations = model.generate(
@@ -169,7 +161,7 @@ def query_model_batch(image_paths: list, prompt: str) -> list:
     for gen in generations:
         new_tokens = gen[input_len:]
         decoded    = processor.decode(new_tokens, skip_special_tokens=True)
-        results.append(decoded.strip())   # 保留原始大小写，不做任何截断
+        results.append(decoded.strip())
     return results
 
 
@@ -203,7 +195,7 @@ def query_model_single(image_path: Path, prompt: str) -> str:
 
 
 def save_results(path: Path, results: dict) -> None:
-    """按编号升序写入 JSON，每条记录占一行。"""
+    """ 按编号升序写入 JSON，每条记录占一行。"""
     with open(path, "w", encoding="utf-8") as f:
         f.write("{\n")
         items = sorted(results.items(), key=lambda kv: int(kv[0]))
@@ -213,16 +205,15 @@ def save_results(path: Path, results: dict) -> None:
         f.write("}\n")
 
 
-def process_folder(image_dir: Path, prompt_idx: int, prompt: str,
+def process_folder(folder: Path, prompt_idx: int, prompt: str,
                    numbered: list) -> None:
     """
-    对同一组图片（numbered）用指定 prompt 做推理，
-    结果写入 {image_dir}/{prompt_idx}_{image_dir.name}.json。
+    对同一组图片（numbered）用指定 prompt 做推理。
+    图片来自 folder/nolabel/，结果写入 folder/{prompt_idx}_{folder.name}.json。
     """
-    output_file = image_dir / f"{prompt_idx}_{image_dir.name}.json"
+    output_file = folder / f"{prompt_idx}_{folder.name}.json"
     print(f"  Output -> {output_file}")
 
-    # 每次实验前重新打乱顺序（各 prompt 顺序独立随机）
     shuffled = numbered[:]
     random.shuffle(shuffled)
 
@@ -244,7 +235,6 @@ def process_folder(image_dir: Path, prompt_idx: int, prompt: str,
             raw_list = query_model_batch(batch_paths, prompt)
             for num, raw in zip(batch_nums, raw_list):
                 results[str(num)] = raw
-                # 打印前 120 字符预览，完整内容已写入 JSON
                 preview = raw[:120].replace("\n", " ")
                 print(f"    {num} -> {preview}{'...' if len(raw) > 120 else ''}")
         except torch.cuda.OutOfMemoryError:
@@ -270,23 +260,28 @@ def process_folder(image_dir: Path, prompt_idx: int, prompt: str,
     print(f"  Saved {len(results)} results -> {output_file}\n")
 
 
-# ── 主流程 ────────────────────────────────────────────────────────────────
+# ── 主流程 ─────────────────────────────────────────────────────────────
 def main():
     TARGET_FOLDERS = ["mediumcolor", "mediumlight", "strongblur",
                       "weakblur", "weakcolor", "weaklight"]
 
-    # 预先收集每个文件夹的图片列表（3 个 prompt 共用同一批图片）
+    # 预先收集每个文件夹的图片（从 nolabel 子目录读取）
     folder_images: dict[Path, list] = {}
     for name in TARGET_FOLDERS:
-        folder = ARTIFACT_DIR / name
+        folder     = ARTIFACT_DIR / name
+        nolabel_dir = folder / "nolabel"
+
         if not folder.is_dir():
             print(f"[WARNING] Folder not found, skipping: {folder}")
             continue
+        if not nolabel_dir.is_dir():
+            print(f"[WARNING] No 'nolabel' subfolder in {folder}, skipping")
+            continue
 
         image_files = (
-            list(folder.glob("*.jpg"))
-            + list(folder.glob("*.jpeg"))
-            + list(folder.glob("*.png"))
+            list(nolabel_dir.glob("*.jpg"))
+            + list(nolabel_dir.glob("*.jpeg"))
+            + list(nolabel_dir.glob("*.png"))
         )
         numbered = []
         for p in image_files:
@@ -298,14 +293,15 @@ def main():
 
         if numbered:
             folder_images[folder] = numbered
+            print(f"  {folder.name}/nolabel : {len(numbered)} images found")
         else:
-            print(f"[SKIP] No valid images in {folder}")
+            print(f"[SKIP] No valid images in {nolabel_dir}")
 
     if not folder_images:
         print(f"No valid folders found under {ARTIFACT_DIR}")
         return
 
-    print(f"Folders to process : {[f.name for f in folder_images]}")
+    print(f"\nFolders to process : {[f.name for f in folder_images]}")
     print(f"Prompts            : {list(PROMPTS.keys())}")
     print(f"Batch size         : {BATCH_SIZE}")
     print()
@@ -319,15 +315,14 @@ def main():
         print(f"  PROMPT {prompt_idx}/{len(PROMPTS)}")
         print(f"{'#'*60}\n")
 
-        for folder_idx, (image_dir, numbered) in enumerate(
-                folder_images.items(), start=1):
+        for folder, numbered in folder_images.items():
             run_counter += 1
             print(f"{'='*60}")
             print(f"[Run {run_counter}/{total_runs}] "
-                  f"Prompt {prompt_idx}  |  Folder: {image_dir.name} "
+                  f"Prompt {prompt_idx}  |  Folder: {folder.name} "
                   f"({len(numbered)} images)")
             print(f"{'='*60}")
-            process_folder(image_dir, prompt_idx, prompt, numbered)
+            process_folder(folder, prompt_idx, prompt, numbered)
 
     print("All experiments done.")
 
