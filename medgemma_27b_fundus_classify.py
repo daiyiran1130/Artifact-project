@@ -1,6 +1,6 @@
 """
 Color fundus image classification — 3-prompt experiment over all artifact sub-folders.
-Model: google/medgemma-27b-it (27B, 4-bit quantized via bitsandbytes)
+Model: google/medgemma-1.5-4b-it (4B, 4-bit quantized via bitsandbytes)
 
 Folder structure expected:
   /root/autodl-tmp/artifact/{folder_name}/nolabel/*.jpg
@@ -12,7 +12,7 @@ For each prompt (1/2/3) and each folder, results are saved as:
 All model output is stored as-is (no token limit, no truncation).
 
 Download the model first:
-  modelscope download --model google/medgemma-27b-it \\
+  modelscope download --model google/medgemma-1.5-4b-it \\
       --cache_dir /root/autodl-tmp/modelscope_cache
 """
 import os
@@ -29,7 +29,7 @@ from PIL import Image
 
 # ── 全局配置 ─────────────────────────────────────────────────────────────
 NOLABEL_DIR  = Path("/root/autodl-tmp/nolabel")
-MODEL_PATH   = Path("/root/autodl-tmp/modelscope_cache/google/medgemma-27b-it")
+MODEL_PATH   = Path("/root/autodl-tmp/modelscope_cache/google/medgemma-1.5-4b-it")
 
 # RTX PRO 6000 显存 96GB，4-bit 模型占约 14GB，剩余约 82GB 可用于 batch
 # Prompt 3 会生成较长的推理链，如遇 OOM 可将 BATCH_SIZE 减小为 4
@@ -73,7 +73,7 @@ if not MODEL_PATH.is_dir():
     raise FileNotFoundError(
         f"{MODEL_PATH} does not exist.\n"
         "Please download the model first:\n"
-        "  modelscope download --model google/medgemma-27b-it "
+        "  modelscope download --model google/medgemma-1.5-4b-it "
         "--cache_dir /root/autodl-tmp/modelscope_cache"
     )
 
