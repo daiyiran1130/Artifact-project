@@ -32,9 +32,8 @@ OUTPUT_DIR  = Path("/root/autodl-tmp/medgemma27b")
 # Canonical class names and their keyword aliases (longest match tried first)
 CLASSES = [
     "age-related macular degeneration",
-    "central serous retinopathy",
     "diabetic retinopathy",
-    "macular hole",
+    "glaucoma",
     "normal",
 ]
 
@@ -43,8 +42,6 @@ ALIASES = {
     "amd":                              "age-related macular degeneration",
     "age related macular degeneration": "age-related macular degeneration",
     "armd":                             "age-related macular degeneration",
-    "csr":                              "central serous retinopathy",
-    "cscr":                             "central serous retinopathy",
     "dr":                               "diabetic retinopathy",
 }
 
