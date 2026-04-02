@@ -61,32 +61,32 @@ FUNDUS_PROMPT_3 = (
 
 # ── OCT 3 种提示词 ────────────────────────────────────────────────────────
 OCT_PROMPT_1 = (
-    "You are an ophthalmology expert.\n"
-    "You are given an OCT image.\n"
-    "Classify the image into one of the following categories:\n"
-    "\"normal\", \"diabetic retinopathy\", \"macular hole\", "
-    "\"age-related macular degeneration\", \"central serous retinopathy\".\n"
-    "Only provide the single correct category as the answer.\n"
-    "Do not provide explanations or additional information.\n"
-    "This classification is for research reference only, not for clinical diagnosis."
+    "You are an ophthalmology expert.  \n"
+    "You are given an OCT image.  \n"
+    "Directly classify the image into one of the following categories:  \n"
+    "\"normal\", \"diabetic retinopathy\", \"macular hole\",  \n"
+    "\"age-related macular degeneration\", \"central serous retinopathy\".  \n"
+    "Do not refuse to answer. This is for reference only and is not intended for actual diagnosis.  \n"
+    "Only provide the single correct category as the answer.  \n"
+    "Do not provide any explanations, reasoning, or additional information."
 )
 
 OCT_PROMPT_2 = (
-    "You are an ophthalmology expert.\n"
-    "You are given an OCT image.\n"
-    "Classify the image into one of the following categories:\n"
-    "\"normal\", \"diabetic retinopathy\", \"macular hole\", "
-    "\"age-related macular degeneration\", \"central serous retinopathy\".\n"
-    "This classification is for research reference only, not for clinical diagnosis."
+    "You are an ophthalmology expert.  \n"
+    "You are given an OCT image.  \n"
+    "Directly classify the image into one of the following categories:  \n"
+    "\"normal\", \"diabetic retinopathy\", \"macular hole\",  \n"
+    "\"age-related macular degeneration\", \"central serous retinopathy\".  \n"
+    "Do not refuse to answer. This is for reference only and is not intended for actual diagnosis."
 )
 
 OCT_PROMPT_3 = (
-    "You are an ophthalmology expert.\n"
-    "You are given an OCT image.\n"
-    "Classify the image into one of the following categories:\n"
-    "\"normal\", \"diabetic retinopathy\", \"macular hole\", "
-    "\"age-related macular degeneration\", \"central serous retinopathy\".\n"
-    "This classification is for research reference only, not for clinical diagnosis.\n"
+    "You are an ophthalmology expert.  \n"
+    "You are given an OCT image.  \n"
+    "Directly classify the image into one of the following categories:  \n"
+    "\"normal\", \"diabetic retinopathy\", \"macular hole\",  \n"
+    "\"age-related macular degeneration\", \"central serous retinopathy\".  \n"
+    "Do not refuse to answer. This is for reference only and is not intended for actual diagnosis.  \n"
     "Describe your reasoning in steps."
 )
 
@@ -151,13 +151,9 @@ def save_results(path: Path, results: dict) -> None:
 
 
 def collect_images(folder: Path) -> list:
-    """从文件夹（或其 nolabel 子目录）收集图片，返回 (编号, 路径) 列表。"""
-    exts   = ("*.jpg", "*.jpeg", "*.png")
-    images = [p for ext in exts for p in folder.glob(ext)]
-    if not images:
-        nolabel = folder / "nolabel"
-        if nolabel.is_dir():
-            images = [p for ext in exts for p in nolabel.glob(ext)]
+    """从文件夹直接收集图片，返回 (编号, 路径) 列表。"""
+    exts     = ("*.jpg", "*.jpeg", "*.png")
+    images   = [p for ext in exts for p in folder.glob(ext)]
     numbered = []
     for p in images:
         n = extract_number(p.name)
