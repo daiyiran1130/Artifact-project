@@ -24,7 +24,7 @@ API_KEY     = "sk-BQl2FqvuLBcIRMnjlTMDyH5MTrjZaKFdejROFCZszCR6WNQJ"
 BASE_URL    = "https://runapi.co"
 MODEL       = "claude-sonnet-4-6"
 TEMPERATURE = 0
-MAX_TOKENS  = 1024
+MAX_TOKENS  = 4096
 
 FUNDUS_DIR = Path("/root/autodl-tmp/fundus")
 OCT_DIR    = Path("/root/autodl-tmp/oct")
