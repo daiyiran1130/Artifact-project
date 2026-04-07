@@ -95,14 +95,11 @@ def normalize_prediction(raw: str, valid_labels: set) -> str | None:
 
 # ── 准确率计算 ─────────────────────────────────────────────────────────────
 def calculate_accuracy(results: dict, labels: dict, valid_labels: set) -> dict:
-    correct   = 0
+    correct  = 0
     incorrect = 0
-    errors    = 0   # API 调用失败的条目
-    no_label  = 0   # 在标签文件中找不到对应编号
-    no_match  = 0   # 模型输出无法匹配任何合法标签
-
-    wrong_examples   = []   # 记录前5个错误样本（便于调试）
-    nomatch_examples = []
+    errors   = 0   # API 调用失败的条目
+    no_label = 0   # 在标签文件中找不到对应编号
+    no_match = 0   # 模型输出无法匹配任何合法标签
 
     for key, raw in results.items():
         num = int(key)
@@ -120,30 +117,24 @@ def calculate_accuracy(results: dict, labels: dict, valid_labels: set) -> dict:
 
         if pred is None:
             no_match += 1
-            if len(nomatch_examples) < 5:
-                nomatch_examples.append({"image": num, "raw": raw[:120]})
             continue
 
         if pred == gt:
             correct += 1
         else:
             incorrect += 1
-            if len(wrong_examples) < 5:
-                wrong_examples.append({"image": num, "gt": gt, "pred": pred})
 
     total_valid = correct + incorrect
     accuracy = round(correct / total_valid, 4) if total_valid > 0 else None
 
     return {
-        "accuracy":         accuracy,
-        "correct":          correct,
-        "incorrect":        incorrect,
-        "no_match":         no_match,
-        "errors":           errors,
-        "no_label":         no_label,
-        "total_entries":    len(results),
-        "wrong_examples":   wrong_examples,
-        "nomatch_examples": nomatch_examples,
+        "accuracy":      accuracy,
+        "correct":       correct,
+        "incorrect":     incorrect,
+        "no_match":      no_match,
+        "errors":        errors,
+        "no_label":      no_label,
+        "total_entries": len(results),
     }
 
 
