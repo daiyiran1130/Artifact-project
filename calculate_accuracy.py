@@ -25,8 +25,8 @@ except ImportError:
 # ── 配置 ──────────────────────────────────────────────────────────────────
 FUNDUS_DIR    = Path("/root/autodl-tmp/fundus")
 OCT_DIR       = Path("/root/autodl-tmp/oct")
-FUNDUS_LABELS = FUNDUS_DIR / "labels.csv"
-OCT_LABELS    = OCT_DIR / "labels-cul.xlsx"
+FUNDUS_LABELS = Path("/root/labels.csv")
+OCT_LABELS    = Path("/root/labels-cul.xlsx")
 OUTPUT_FILE   = Path("accuracy_results.json")
 
 # 合法标签集合（小写），用于从模型输出中提取分类结果
