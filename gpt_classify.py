@@ -169,19 +169,29 @@ def process_folder(folder: Path, image_type: str, prompt_idx: int,
     output_file = folder / f"{prompt_idx}_{image_type}_{folder.name}.json"
     print(f"  Output -> {output_file}")
 
-    shuffled = numbered[:]
-    random.shuffle(shuffled)
+    # 加载已有结果，跳过成功的条目，只重跑缺失或报错的
+    if output_file.exists():
+        with open(output_file, "r", encoding="utf-8") as f:
+            results = json.load(f)
+        done_ok = {k for k, v in results.items() if not str(v).startswith("error:")}
+        print(f"  Resume: {len(done_ok)} already done, "
+              f"{len(results) - len(done_ok)} errors will be retried.")
+    else:
+        results  = {}
+        done_ok  = set()
 
-    results = {}
-    save_results(output_file, results)
+    pending = [(n, p) for n, p in numbered if str(n) not in done_ok]
+    random.shuffle(pending)
 
-    total = len(shuffled)
-    for idx, (num, img_path) in enumerate(shuffled, start=1):
-        key = str(num)
-        print(f"  [{idx}/{total}] {img_path.name} ...", end=" ", flush=True)
-        raw     = query_api(img_path, prompt)
+    total = len(numbered)
+    done  = len(done_ok)
+    for num, img_path in pending:
+        done += 1
+        key   = str(num)
+        print(f"  [{done}/{total}] {img_path.name} ...", end=" ", flush=True)
+        raw          = query_api(img_path, prompt)
         results[key] = raw
-        preview = raw[:100].replace("\n", " ")
+        preview      = raw[:100].replace("\n", " ")
         print(f"-> {preview}{'...' if len(raw) > 100 else ''}")
         save_results(output_file, results)
 
