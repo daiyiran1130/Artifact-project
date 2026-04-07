@@ -101,6 +101,9 @@ def calculate_accuracy(results: dict, labels: dict, valid_labels: set) -> dict:
     no_label = 0   # 在标签文件中找不到对应编号
     no_match = 0   # 模型输出无法匹配任何合法标签
 
+    # 各类别统计：{label: {"correct": int, "total": int}}
+    per_class: dict[str, dict] = {lb: {"correct": 0, "total": 0} for lb in valid_labels}
+
     for key, raw in results.items():
         num = int(key)
 
@@ -117,7 +120,15 @@ def calculate_accuracy(results: dict, labels: dict, valid_labels: set) -> dict:
 
         if pred is None:
             no_match += 1
+            # 该图片属于 gt 类，仍计入该类的 total
+            if gt in per_class:
+                per_class[gt]["total"] += 1
             continue
+
+        if gt in per_class:
+            per_class[gt]["total"] += 1
+            if pred == gt:
+                per_class[gt]["correct"] += 1
 
         if pred == gt:
             correct += 1
@@ -127,14 +138,25 @@ def calculate_accuracy(results: dict, labels: dict, valid_labels: set) -> dict:
     total_valid = correct + incorrect
     accuracy = round(correct / total_valid, 4) if total_valid > 0 else None
 
+    # 计算各类别准确率
+    per_class_accuracy = {}
+    for lb, stat in per_class.items():
+        if stat["total"] > 0:
+            per_class_accuracy[lb] = {
+                "accuracy": round(stat["correct"] / stat["total"], 4),
+                "correct":  stat["correct"],
+                "total":    stat["total"],
+            }
+
     return {
-        "accuracy":      accuracy,
-        "correct":       correct,
-        "incorrect":     incorrect,
-        "no_match":      no_match,
-        "errors":        errors,
-        "no_label":      no_label,
-        "total_entries": len(results),
+        "accuracy":           accuracy,
+        "correct":            correct,
+        "incorrect":          incorrect,
+        "no_match":           no_match,
+        "errors":             errors,
+        "no_label":           no_label,
+        "total_entries":      len(results),
+        "per_class_accuracy": per_class_accuracy,
     }
 
 
