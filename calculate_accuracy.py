@@ -27,7 +27,7 @@ except ImportError:
 # ── 配置 ──────────────────────────────────────────────────────────────────
 RESULTS_DIR   = Path("/root/autodl-tmp/GPTRESULTS")
 FUNDUS_LABELS = Path("/root/labels.csv")
-OCT_LABELS    = Path("/root/labels-cul.xlsx")
+OCT_LABELS    = Path("/root/octlabel.csv")
 OUTPUT_FILE   = Path("accuracy_results.json")
 
 # 合法标签集合（小写）
@@ -157,7 +157,7 @@ def main():
     print(f"  {len(fundus_labels)} labels loaded.")
 
     print(f"Loading OCT labels from {OCT_LABELS} ...")
-    oct_labels = load_oct_labels(OCT_LABELS)
+    oct_labels = load_fundus_labels(OCT_LABELS)
     print(f"  {len(oct_labels)} labels loaded.\n")
 
     # 文件名格式：{prompt_idx}_{image_type}_{folder_name}.json

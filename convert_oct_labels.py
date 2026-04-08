@@ -19,7 +19,7 @@ except ImportError:
     raise ImportError("Please run: pip install openpyxl")
 
 XLSX_PATH   = Path("/root/labels-cul.xlsx")
-OUTPUT_PATH = Path("octlabel.csv")
+OUTPUT_PATH = Path("/root/octlabel.csv")
 
 ABBREV_MAP = {
     "amrd":   "age-related macular degeneration",
