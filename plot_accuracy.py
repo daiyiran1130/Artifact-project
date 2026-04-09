@@ -153,29 +153,60 @@ def extract_label(raw_text: str, dataset_type: str):
             return matched
 
     # --- Format 2 & 3: regex extraction ---
+    # 先去掉双引号包裹（""word"" → word），方便后面匹配
+    text_clean = text.replace('""', '"')
+
     patterns = [
-        # **Classification: Label** or **Classification (qualifier): Label**
+        # **Classification: Label** 或 **Classification (qualifier): Label**
         r'\*{1,2}\s*Classification(?:[^:*\n]*):\s*([^*\n]{2,80?}?)\s*\*{1,2}',
         # ## Classification: Label
         r'#{1,3}\s*Classification(?:[^:\n]*):\s*([^\n]{2,80})',
-        # Plain "Classification: Label" (first occurrence)
+        # "Classification: Label" 普通形式
         r'\bClassification(?:[^:\n]*):\s*([^\n\*#,]{2,80})',
+        # "the (most likely) classification is X"  ← Format 3 常见结论句
+        r'(?:most likely\s+)?classification\s+is\s+"?([^".\n,]{2,60})"?',
+        # "classified as X"
+        r'classified\s+as\s+"?([^".\n,]{2,60})"?',
+        # "most consistent with X"
+        r'most\s+consistent\s+with\s+"?([^".\n,]{2,60})"?',
+        # "the image is most likely X" / "most likely X"
+        r'(?:image\s+is\s+)?most\s+likely\s+"?([^".\n,]{2,60})"?',
+        # "diagnosis/assessment: X" 或 "primary classification: X"
+        r'(?:diagnosis|assessment|primary\s+classification)\s*[:\-]\s*"?([^".\n,]{2,60})"?',
     ]
     for pattern in patterns:
-        m = re.search(pattern, text, re.IGNORECASE)
+        m = re.search(pattern, text_clean, re.IGNORECASE)
         if m:
-            candidate = m.group(1).strip().strip('*').strip('#').strip()
+            candidate = m.group(1).strip().strip('"').strip("'").strip('*').strip()
             matched = _fuzzy_match(candidate, vocab)
             if matched:
                 return matched
 
-    # --- Last resort: scan full text for known labels (longest match wins) ---
-    text_low = text.lower()
-    for label in sorted(vocab, key=len, reverse=True):
-        if label.lower() in text_low:
+    # --- 兜底扫描：在结论区域优先搜索，避免在否定句中误匹配 ---
+    # 策略：先在最后 30% 的文本里找（结论通常在末尾），再搜全文
+    # 同时跳过紧跟否定词之后的标签
+    _NEG = re.compile(
+        r'\b(?:no|not|without|absence\s+of|rule\s+out|negative\s+for|'
+        r'unlikely|does\s+not|cannot|can\'t|nor)\b',
+        re.IGNORECASE
+    )
+    text_low = text_clean.lower()
+    tail = text_clean[int(len(text_clean) * 0.6):]   # 后 40% 文本
+
+    for search_zone in (tail, text_clean):
+        zone_low = search_zone.lower()
+        for label in sorted(vocab, key=len, reverse=True):
+            lab_low = label.lower()
+            pos = zone_low.find(lab_low)
+            if pos == -1:
+                continue
+            # 检查该位置之前 60 个字符是否有否定词
+            context_before = search_zone[max(0, pos - 60): pos]
+            if _NEG.search(context_before):
+                continue   # 否定语境，跳过
             return label
 
-    return None   # Could not parse
+    return None   # 无法解析
 
 
 # ================================================================
