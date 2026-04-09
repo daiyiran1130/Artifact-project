@@ -23,7 +23,7 @@ import json
 import numpy as np
 import pandas as pd
 import matplotlib
-matplotlib.use('Agg')   # Remove this line if you want an interactive popup window
+# matplotlib.use('Agg')  # ← 取消注释此行可关闭弹窗，只保存文件（服务器/无界面环境使用）
 import matplotlib.pyplot as plt
 import matplotlib.patches as mpatches
 from matplotlib.lines import Line2D
@@ -69,6 +69,9 @@ RANDOM_SEED = 42
 # ---- Figure output ----
 FIGURE_DPI  = 600
 FIGURE_SIZE = (2000 / FIGURE_DPI, 2250 / FIGURE_DPI)   # → (3.333, 3.75) inches @ 600 dpi = 2000×2250 px
+SHOW_PLOT   = True   # True = PyCharm 里弹窗预览；False = 只保存不弹窗
+# ---- 图像保存目录（留空则保存到脚本运行时的当前目录）----
+OUTPUT_DIR  = ""     # 例如改成 r"D:\work\artifact photo\charts" 则固定存到该文件夹
 
 # ----------------------------------------------------------------
 # ★  默认输入值 — 每次运行时的预填项，直接回车即可使用默认值  ★
@@ -459,9 +462,12 @@ def plot_mode_a(dataset_type: str, image_type: str,
     plt.tight_layout()
 
     if output_path is None:
-        output_path = f"chart_A_{dataset_type}_{image_type}_prompt{prompt_num}.png"
+        fname = f"chart_A_{dataset_type}_{image_type}_prompt{prompt_num}.png"
+        output_path = os.path.join(OUTPUT_DIR, fname) if OUTPUT_DIR else fname
     plt.savefig(output_path, dpi=FIGURE_DPI, bbox_inches='tight', facecolor='white')
-    print(f"\n  ✓ Saved → {output_path}")
+    print(f"\n  ✓ Saved → {os.path.abspath(output_path)}")
+    if SHOW_PLOT:
+        plt.show()
     plt.close(fig)
 
 
@@ -649,9 +655,12 @@ def plot_mode_b(dataset_type: str, image_types: list, prompt_num: str,
 
     if output_path is None:
         img_str = '_'.join(image_types)
-        output_path = f"chart_B_{dataset_type}_{img_str}_prompt{prompt_num}.png"
+        fname = f"chart_B_{dataset_type}_{img_str}_prompt{prompt_num}.png"
+        output_path = os.path.join(OUTPUT_DIR, fname) if OUTPUT_DIR else fname
     plt.savefig(output_path, dpi=FIGURE_DPI, bbox_inches='tight', facecolor='white')
-    print(f"\n  ✓ Saved → {output_path}")
+    print(f"\n  ✓ Saved → {os.path.abspath(output_path)}")
+    if SHOW_PLOT:
+        plt.show()
     plt.close(fig)
 
 
