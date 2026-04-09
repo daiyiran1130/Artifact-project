@@ -2,8 +2,11 @@
 """
 Medical Image Classification Bar Chart Generator
 =================================================
-Draws accuracy bar charts with 95% bootstrap CI and pairwise McNemar tests
-for comparing model performance across different experimental conditions.
+Draws accuracy bar charts with 95% bootstrap CI and pairwise McNemar tests.
+
+Two chart modes:
+  Mode A  X-axis = models      (4 bars, 1 image type per chart)
+  Mode B  X-axis = image types (groups of 4 model bars, up to N image types)
 
 Usage:
     python plot_accuracy.py
@@ -278,7 +281,7 @@ def sig_label(p_raw: float, n_tests: int = 1) -> tuple:
 
 
 # ================================================================
-# PLOTTING
+# PLOTTING — shared helpers
 # ================================================================
 
 def _draw_bracket(ax, x1, x2, y_base, bar_h, text, fontsize=9):
@@ -295,156 +298,11 @@ def _draw_bracket(ax, x1, x2, y_base, bar_h, text, fontsize=9):
     )
 
 
-def plot_bar_chart(dataset_type: str, image_type: str,
-                   prompt_num: str, output_path: str = None):
-    """Load data, run statistics, and render the bar chart."""
-
-    print(f"\n{'='*58}")
-    print(f"  dataset={dataset_type}  image_type={image_type}  prompt={prompt_num}")
-    print(f"{'='*58}")
-
-    # ── 1. Ground truth ──────────────────────────────────────────
-    print("\n[1/4] Loading ground truth…")
-    gt = load_ground_truth(dataset_type)
-    print(f"  {len(gt)} samples  |  labels: {set(gt.values())}")
-
-    # ── 2. Model predictions ─────────────────────────────────────
-    print("\n[2/4] Locating JSON files…")
-    json_files = find_json_files(dataset_type, image_type, prompt_num)
-    if not json_files:
-        print("  ERROR: no JSON files found — check inputs.")
-        return
-
-    # ── 3. Per-sample correctness + bootstrap CI ─────────────────
-    print("\n[3/4] Computing accuracy & bootstrap CI…")
-    results = {}
-    for model, fpath in json_files.items():
-        print(f"  {os.path.basename(fpath)}")
-        preds   = load_json_results(fpath, dataset_type)
-        correct = per_sample_correctness(preds, gt)
-        acc, ci_lo, ci_hi = bootstrap_ci(correct)
-        results[model] = dict(correct=correct, acc=acc, ci_lo=ci_lo, ci_hi=ci_hi)
-        print(f"    {MODEL_NAMES[model]:12s}  acc={acc:.4f}  "
-              f"95%CI=[{ci_lo:.4f},{ci_hi:.4f}]  n={len(correct)}")
-
-    models   = list(results.keys())
-    n_models = len(models)
-
-    # ── 4. Pairwise McNemar (Bonferroni) ─────────────────────────
-    print("\n[4/4] Pairwise McNemar tests (Bonferroni)…")
-    pairs   = list(combinations(range(n_models), 2))
-    n_pairs = len(pairs)
-    pstats  = {}    # (i,j) -> {sig, p_raw, p_adj}
-
-    for i, j in pairs:
-        m1, m2   = models[i], models[j]
-        common   = sorted(set(results[m1]['correct']) & set(results[m2]['correct']))
-        c1       = np.array([results[m1]['correct'][k] for k in common])
-        c2       = np.array([results[m2]['correct'][k] for k in common])
-        p_raw    = mcnemar_test(c1, c2)
-        lab, p_adj = sig_label(p_raw, n_tests=n_pairs)
-        pstats[(i, j)] = dict(sig=lab, p_raw=p_raw, p_adj=p_adj)
-        print(f"  {MODEL_NAMES[m1]:12s} vs {MODEL_NAMES[m2]:12s}  "
-              f"p={p_raw:.4f}  p_adj={p_adj:.4f}  {lab}")
-
-    # ── Figure ───────────────────────────────────────────────────
-    fig, ax = plt.subplots(figsize=FIGURE_SIZE, dpi=FIGURE_DPI)
-    fig.patch.set_facecolor('white')
-    ax.set_facecolor('#FAFAFA')
-
-    x         = np.arange(n_models)
-    bar_width = 0.52
-    max_ci_hi = 0.0
-
-    for idx, model in enumerate(models):
-        r   = results[model]
-        acc = r['acc']
-        err_dn = acc - r['ci_lo']
-        err_up = r['ci_hi'] - acc
-        max_ci_hi = max(max_ci_hi, r['ci_hi'])
-
-        # Bar
-        ax.bar(
-            x[idx], acc,
-            width=bar_width,
-            color=MODEL_COLORS.get(model, '#888888'),
-            alpha=0.90,
-            edgecolor='white',
-            linewidth=0.8,
-            zorder=3,
-        )
-        # Error bar (CI)
-        ax.errorbar(
-            x[idx], acc,
-            yerr=[[err_dn], [err_up]],
-            fmt='none',
-            ecolor='#111111',
-            elinewidth=2.2,
-            capsize=8,
-            capthick=2.2,
-            zorder=4,
-        )
-        # Accuracy label on top
-        ax.text(
-            x[idx], r['ci_hi'] + 0.013,
-            f'{acc:.3f}',
-            ha='center', va='bottom',
-            fontsize=11, fontweight='bold', color='#111111',
-            zorder=5,
-        )
-
-    # Significance brackets — stack by span distance
-    BRACKET_H   = 0.018   # height of the bracket's horizontal bar
-    BRACKET_GAP = 0.050   # vertical gap between stacking levels
-    y0 = max_ci_hi + 0.060
-
-    # Group pairs by bar-span distance; draw closest pairs at the bottom
-    dist_groups: dict = {}
-    for (i, j) in pairs:
-        dist_groups.setdefault(j - i, []).append((i, j))
-
-    level = 0
-    for dist in sorted(dist_groups):
-        for (i, j) in dist_groups[dist]:
-            y = y0 + level * BRACKET_GAP
-            _draw_bracket(ax, x[i], x[j], y, BRACKET_H,
-                          pstats[(i, j)]['sig'], fontsize=9)
-            level += 1
-
-    # ── Axis formatting ──────────────────────────────────────────
-    ax.set_xticks(x)
-    ax.set_xticklabels(
-        [MODEL_NAMES[m] for m in models],
-        fontsize=13, fontweight='bold'
-    )
-    ax.tick_params(axis='y', labelsize=11)
-    ax.set_ylabel('Accuracy', fontsize=13, labelpad=8)
-    ax.set_xlim(-0.55, n_models - 0.45)
-    ax.set_ylim(0, y0 + level * BRACKET_GAP + 0.08)
-
-    ax.set_title(
-        f"Model Accuracy Comparison\n"
-        f"Dataset: {dataset_type.upper()}   |   Image type: {image_type}   |   Prompt: {prompt_num}",
-        fontsize=14, fontweight='bold', pad=14
-    )
-    ax.yaxis.set_major_formatter(plt.FuncFormatter(lambda v, _: f'{v:.2f}'))
-    ax.grid(axis='y', linestyle='--', alpha=0.35, zorder=0)
-    ax.spines['top'].set_visible(False)
-    ax.spines['right'].set_visible(False)
-    ax.spines['left'].set_alpha(0.5)
-    ax.spines['bottom'].set_alpha(0.5)
-
-    # ── Legend ───────────────────────────────────────────────────
-    model_patches = [
-        mpatches.Patch(
-            color=MODEL_COLORS.get(m, '#888888'), alpha=0.90,
-            label=MODEL_NAMES[m]
-        )
-        for m in models
-    ]
-    note_lines = [
+def _sig_legend_lines():
+    """Return the standard significance legend entries."""
+    return [
         Line2D([], [], color='none', label=''),
-        Line2D([], [], color='none', label='Significance (McNemar test,'),
+        Line2D([], [], color='none', label='Significance (McNemar,'),
         Line2D([], [], color='none', label='Bonferroni corrected):'),
         Line2D([], [], color='none', label='  ***  p < 0.001'),
         Line2D([], [], color='none', label='  **   p < 0.01'),
@@ -454,21 +312,329 @@ def plot_bar_chart(dataset_type: str, image_type: str,
         Line2D([], [], color='none',
                label=f'Error bars: {int(CI_LEVEL*100)}% CI (bootstrap)'),
     ]
-    ax.legend(
-        handles=model_patches + note_lines,
-        loc='upper right',
-        fontsize=9,
-        framealpha=0.90,
-        edgecolor='#cccccc',
-        handlelength=1.2,
+
+
+def _apply_common_style(ax):
+    ax.yaxis.set_major_formatter(plt.FuncFormatter(lambda v, _: f'{v:.2f}'))
+    ax.grid(axis='y', linestyle='--', alpha=0.35, zorder=0)
+    ax.spines['top'].set_visible(False)
+    ax.spines['right'].set_visible(False)
+    ax.spines['left'].set_alpha(0.5)
+    ax.spines['bottom'].set_alpha(0.5)
+    ax.tick_params(axis='y', labelsize=11)
+    ax.set_ylabel('Accuracy', fontsize=13, labelpad=8)
+
+
+# ================================================================
+# MODE A — X-axis = models  (4 bars, one image type)
+# ================================================================
+
+def plot_mode_a(dataset_type: str, image_type: str,
+                prompt_num: str, output_path: str = None):
+    """
+    Mode A: bar per model, single image type.
+    Significance brackets shown for ALL model pairs.
+    """
+    print(f"\n{'='*58}")
+    print(f"  [Mode A]  dataset={dataset_type}  image={image_type}  prompt={prompt_num}")
+    print(f"{'='*58}")
+
+    gt = load_ground_truth(dataset_type)
+    print(f"  Ground truth: {len(gt)} samples | {set(gt.values())}")
+
+    json_files = find_json_files(dataset_type, image_type, prompt_num)
+    if not json_files:
+        print("  ERROR: no JSON files found."); return
+
+    # ── Per-sample correctness + CI ──────────────────────────────
+    results = {}
+    for model, fpath in json_files.items():
+        print(f"  Loading {os.path.basename(fpath)}")
+        preds   = load_json_results(fpath, dataset_type)
+        correct = per_sample_correctness(preds, gt)
+        acc, ci_lo, ci_hi = bootstrap_ci(correct)
+        results[model] = dict(correct=correct, acc=acc, ci_lo=ci_lo, ci_hi=ci_hi)
+        print(f"    {MODEL_NAMES[model]:12s}  acc={acc:.4f}  "
+              f"CI=[{ci_lo:.4f},{ci_hi:.4f}]  n={len(correct)}")
+
+    models   = list(results.keys())
+    n_models = len(models)
+    pairs    = list(combinations(range(n_models), 2))
+    n_pairs  = len(pairs)
+
+    # ── Pairwise McNemar ─────────────────────────────────────────
+    print("\n  Pairwise McNemar tests (Bonferroni):")
+    pstats = {}
+    for i, j in pairs:
+        m1, m2 = models[i], models[j]
+        common = sorted(set(results[m1]['correct']) & set(results[m2]['correct']))
+        c1 = np.array([results[m1]['correct'][k] for k in common])
+        c2 = np.array([results[m2]['correct'][k] for k in common])
+        p_raw = mcnemar_test(c1, c2)
+        lab, p_adj = sig_label(p_raw, n_tests=n_pairs)
+        pstats[(i, j)] = dict(sig=lab, p_raw=p_raw, p_adj=p_adj)
+        print(f"    {MODEL_NAMES[m1]:12s} vs {MODEL_NAMES[m2]:12s}  "
+              f"p={p_raw:.4f}  p_adj={p_adj:.4f}  {lab}")
+
+    # ── Figure ───────────────────────────────────────────────────
+    fig, ax = plt.subplots(figsize=FIGURE_SIZE, dpi=FIGURE_DPI)
+    fig.patch.set_facecolor('white')
+    ax.set_facecolor('#FAFAFA')
+
+    x         = np.arange(n_models, dtype=float)
+    bar_width = 0.52
+    max_ci_hi = 0.0
+
+    for idx, model in enumerate(models):
+        r      = results[model]
+        acc    = r['acc']
+        err_dn = acc - r['ci_lo']
+        err_up = r['ci_hi'] - acc
+        max_ci_hi = max(max_ci_hi, r['ci_hi'])
+
+        ax.bar(x[idx], acc, width=bar_width,
+               color=MODEL_COLORS.get(model, '#888888'),
+               alpha=0.90, edgecolor='white', linewidth=0.8, zorder=3)
+        ax.errorbar(x[idx], acc, yerr=[[err_dn], [err_up]],
+                    fmt='none', ecolor='#111111',
+                    elinewidth=2.2, capsize=8, capthick=2.2, zorder=4)
+        ax.text(x[idx], r['ci_hi'] + 0.013, f'{acc:.3f}',
+                ha='center', va='bottom',
+                fontsize=11, fontweight='bold', color='#111111', zorder=5)
+
+    # Significance brackets — stacked by pair span distance
+    BRACKET_H   = 0.018
+    BRACKET_GAP = 0.050
+    y0 = max_ci_hi + 0.060
+
+    dist_groups: dict = {}
+    for (i, j) in pairs:
+        dist_groups.setdefault(j - i, []).append((i, j))
+
+    level = 0
+    for dist in sorted(dist_groups):
+        for (i, j) in dist_groups[dist]:
+            _draw_bracket(ax, x[i], x[j],
+                          y0 + level * BRACKET_GAP,
+                          BRACKET_H, pstats[(i, j)]['sig'], fontsize=9)
+            level += 1
+
+    # ── Axes ─────────────────────────────────────────────────────
+    ax.set_xticks(x)
+    ax.set_xticklabels([MODEL_NAMES[m] for m in models],
+                       fontsize=13, fontweight='bold')
+    ax.set_xlim(-0.55, n_models - 0.45)
+    ax.set_ylim(0, y0 + level * BRACKET_GAP + 0.08)
+    ax.set_title(
+        f"Model Accuracy Comparison\n"
+        f"Dataset: {dataset_type.upper()}   |   Image type: {image_type}   |   Prompt: {prompt_num}",
+        fontsize=14, fontweight='bold', pad=14
     )
+    _apply_common_style(ax)
+
+    model_patches = [
+        mpatches.Patch(color=MODEL_COLORS.get(m, '#888888'), alpha=0.90,
+                       label=MODEL_NAMES[m])
+        for m in models
+    ]
+    ax.legend(handles=model_patches + _sig_legend_lines(),
+              loc='upper right', fontsize=9,
+              framealpha=0.90, edgecolor='#cccccc', handlelength=1.2)
 
     plt.tight_layout()
 
-    # ── Save ─────────────────────────────────────────────────────
     if output_path is None:
-        output_path = f"chart_{dataset_type}_{image_type}_prompt{prompt_num}.png"
+        output_path = f"chart_A_{dataset_type}_{image_type}_prompt{prompt_num}.png"
+    plt.savefig(output_path, dpi=FIGURE_DPI, bbox_inches='tight', facecolor='white')
+    print(f"\n  ✓ Saved → {output_path}")
+    plt.close(fig)
 
+
+# ================================================================
+# MODE B — X-axis = image types  (N groups × 4 model bars)
+# ================================================================
+
+def plot_mode_b(dataset_type: str, image_types: list, prompt_num: str,
+                output_path: str = None):
+    """
+    Mode B: groups of bars by image type, bars within each group = models.
+    Only statistically significant within-group brackets are drawn to avoid clutter.
+    Bonferroni correction is applied across ALL within-group pairs combined.
+    """
+    print(f"\n{'='*58}")
+    print(f"  [Mode B]  dataset={dataset_type}  prompt={prompt_num}")
+    print(f"  Image types: {image_types}")
+    print(f"{'='*58}")
+
+    gt = load_ground_truth(dataset_type)
+    print(f"  Ground truth: {len(gt)} samples | {set(gt.values())}")
+
+    # Ordered model list (consistent left-to-right order within every group)
+    all_models = list(MODEL_NAMES.keys())
+    n_models   = len(all_models)
+    pairs      = list(combinations(range(n_models), 2))
+
+    # Bonferroni denominator = total pairs across all groups
+    n_total_tests = len(image_types) * len(pairs)
+
+    # ── Load all results ─────────────────────────────────────────
+    # all_res[img_type][model] = {correct, acc, ci_lo, ci_hi}
+    all_res: dict = {}
+    for img_type in image_types:
+        print(f"\n  Image type: {img_type}")
+        json_files = find_json_files(dataset_type, img_type, prompt_num)
+        group_res  = {}
+        for model in all_models:
+            if model not in json_files:
+                continue
+            print(f"    Loading {os.path.basename(json_files[model])}")
+            preds   = load_json_results(json_files[model], dataset_type)
+            correct = per_sample_correctness(preds, gt)
+            acc, ci_lo, ci_hi = bootstrap_ci(correct)
+            group_res[model] = dict(correct=correct, acc=acc,
+                                    ci_lo=ci_lo, ci_hi=ci_hi)
+            print(f"      {MODEL_NAMES[model]:12s}  acc={acc:.4f}  "
+                  f"CI=[{ci_lo:.4f},{ci_hi:.4f}]  n={len(correct)}")
+        all_res[img_type] = group_res
+
+    # ── Pairwise McNemar within each group ───────────────────────
+    # pstats[(img_type, i, j)] = {sig, p_raw, p_adj}
+    pstats: dict = {}
+    print("\n  Pairwise McNemar tests (Bonferroni across all groups):")
+    for img_type in image_types:
+        for i, j in pairs:
+            m1, m2 = all_models[i], all_models[j]
+            if m1 not in all_res[img_type] or m2 not in all_res[img_type]:
+                continue
+            c1d = all_res[img_type][m1]['correct']
+            c2d = all_res[img_type][m2]['correct']
+            common = sorted(set(c1d) & set(c2d))
+            c1 = np.array([c1d[k] for k in common])
+            c2 = np.array([c2d[k] for k in common])
+            p_raw = mcnemar_test(c1, c2)
+            lab, p_adj = sig_label(p_raw, n_tests=n_total_tests)
+            pstats[(img_type, i, j)] = dict(sig=lab, p_raw=p_raw, p_adj=p_adj)
+            if lab != 'ns':
+                print(f"    [{img_type}] {MODEL_NAMES[m1]:12s} vs "
+                      f"{MODEL_NAMES[m2]:12s}  "
+                      f"p={p_raw:.4f}  p_adj={p_adj:.4f}  {lab}")
+
+    # ── Figure layout ─────────────────────────────────────────────
+    n_groups    = len(image_types)
+    bar_width   = 0.16          # each individual bar
+    group_gap   = 0.45          # gap between groups (in data units)
+    inner_span  = n_models * bar_width   # total width of bars in one group
+    group_step  = inner_span + group_gap # center-to-center distance between groups
+
+    # Bar offsets within a group (centered at 0)
+    offsets = np.array([(k - (n_models - 1) / 2) * bar_width
+                        for k in range(n_models)])
+    group_centers = np.arange(n_groups) * group_step
+
+    fig_width = max(FIGURE_SIZE[0], n_groups * 3.2)
+    fig, ax = plt.subplots(figsize=(fig_width, FIGURE_SIZE[1]), dpi=FIGURE_DPI)
+    fig.patch.set_facecolor('white')
+    ax.set_facecolor('#FAFAFA')
+
+    max_ci_hi = 0.0
+
+    for g_idx, img_type in enumerate(image_types):
+        for m_idx, model in enumerate(all_models):
+            if model not in all_res.get(img_type, {}):
+                continue
+            r   = all_res[img_type][model]
+            xc  = group_centers[g_idx] + offsets[m_idx]
+            acc = r['acc']
+            max_ci_hi = max(max_ci_hi, r['ci_hi'])
+
+            ax.bar(xc, acc, width=bar_width * 0.88,
+                   color=MODEL_COLORS.get(model, '#888888'),
+                   alpha=0.90, edgecolor='white', linewidth=0.5, zorder=3)
+            ax.errorbar(xc, acc,
+                        yerr=[[acc - r['ci_lo']], [r['ci_hi'] - acc]],
+                        fmt='none', ecolor='#111111',
+                        elinewidth=1.6, capsize=4, capthick=1.6, zorder=4)
+            # Small accuracy label above CI bar
+            ax.text(xc, r['ci_hi'] + 0.010, f'{acc:.3f}',
+                    ha='center', va='bottom',
+                    fontsize=6.5, fontweight='bold', color='#111111',
+                    rotation=90, zorder=5)
+
+    # ── Significance brackets (within groups, significant only) ──
+    BRACKET_H   = 0.015
+    BRACKET_GAP = 0.044
+    y0 = max_ci_hi + 0.055   # common baseline for all groups
+
+    for g_idx, img_type in enumerate(image_types):
+        # Collect significant pairs for this group, sort by span distance
+        dist_groups: dict = {}
+        for (i, j) in pairs:
+            key = (img_type, i, j)
+            if key not in pstats or pstats[key]['sig'] == 'ns':
+                continue
+            dist_groups.setdefault(j - i, []).append((i, j))
+
+        level = 0
+        for dist in sorted(dist_groups):
+            for (i, j) in dist_groups[dist]:
+                x1 = group_centers[g_idx] + offsets[i]
+                x2 = group_centers[g_idx] + offsets[j]
+                _draw_bracket(ax, x1, x2,
+                              y0 + level * BRACKET_GAP,
+                              BRACKET_H, pstats[(img_type, i, j)]['sig'],
+                              fontsize=8)
+                level += 1
+
+    # ── Axes ─────────────────────────────────────────────────────
+    ax.set_xticks(group_centers)
+    ax.set_xticklabels(image_types, fontsize=12, fontweight='bold')
+    ax.set_xlim(group_centers[0] - group_step * 0.55,
+                group_centers[-1] + group_step * 0.55)
+
+    # Dynamic y_max: enough room for any bracket stack
+    max_bracket_levels = max(
+        (sum(
+            1 for (i, j) in pairs
+            if (img_type, i, j) in pstats and pstats[(img_type, i, j)]['sig'] != 'ns'
+        ) for img_type in image_types),
+        default=0
+    )
+    ax.set_ylim(0, y0 + max_bracket_levels * BRACKET_GAP + 0.10)
+
+    ax.set_title(
+        f"Model Accuracy Comparison by Image Type\n"
+        f"Dataset: {dataset_type.upper()}   |   Prompt: {prompt_num}",
+        fontsize=14, fontweight='bold', pad=14
+    )
+    _apply_common_style(ax)
+
+    # ── Legend ───────────────────────────────────────────────────
+    model_patches = [
+        mpatches.Patch(color=MODEL_COLORS.get(m, '#888888'), alpha=0.90,
+                       label=MODEL_NAMES[m])
+        for m in all_models
+    ]
+    extra = [
+        Line2D([], [], color='none', label=''),
+        Line2D([], [], color='none', label='Significance (McNemar,'),
+        Line2D([], [], color='none', label='Bonferroni corrected):'),
+        Line2D([], [], color='none', label='  ***  p < 0.001'),
+        Line2D([], [], color='none', label='  **   p < 0.01'),
+        Line2D([], [], color='none', label='  *    p < 0.05'),
+        Line2D([], [], color='none', label='(non-sig. brackets hidden)'),
+        Line2D([], [], color='none', label=''),
+        Line2D([], [], color='none',
+               label=f'Error bars: {int(CI_LEVEL*100)}% CI (bootstrap)'),
+    ]
+    ax.legend(handles=model_patches + extra,
+              loc='upper right', fontsize=9,
+              framealpha=0.90, edgecolor='#cccccc', handlelength=1.2)
+
+    plt.tight_layout()
+
+    if output_path is None:
+        img_str = '_'.join(image_types)
+        output_path = f"chart_B_{dataset_type}_{img_str}_prompt{prompt_num}.png"
     plt.savefig(output_path, dpi=FIGURE_DPI, bbox_inches='tight', facecolor='white')
     print(f"\n  ✓ Saved → {output_path}")
     plt.close(fig)
@@ -478,7 +644,7 @@ def plot_bar_chart(dataset_type: str, image_type: str,
 # MAIN — interactive CLI
 # ================================================================
 
-def _prompt(msg: str, default: str = None) -> str:
+def _ask(msg: str, default: str = None) -> str:
     suffix = f" [{default}]" if default else ""
     raw = input(f"  {msg}{suffix}: ").strip()
     return raw if raw else (default or raw)
@@ -489,18 +655,37 @@ def main():
     print("  Medical Image Classification Chart Generator")
     print("=" * 58)
     print(f"  Results dir : {RESULTS_DIR}")
-    print(f"  Models      : {', '.join(MODEL_NAMES.values())}\n")
+    print(f"  Models      : {', '.join(MODEL_NAMES.values())}")
+    print()
+    print("  Chart modes:")
+    print("    A — X-axis = models      (4 bars, 1 image type)")
+    print("    B — X-axis = image types (groups of 4 model bars)")
+    print()
 
-    dataset   = _prompt("Dataset type  (fundus / oct)").lower()
+    mode = _ask("Mode (A / B)").upper()
+    if mode not in ('A', 'B'):
+        print("  ERROR: mode must be A or B"); return
+
+    dataset = _ask("Dataset type (fundus / oct)").lower()
     if dataset not in CSV_PATHS:
         print(f"  ERROR: unknown dataset '{dataset}'. "
-              f"Must be one of {list(CSV_PATHS.keys())}"); return
+              f"Choose from {list(CSV_PATHS.keys())}"); return
 
-    img_type  = _prompt("Image type    (e.g. weakblur, strongblur, mediumcolor)")
-    prompt_n  = _prompt("Prompt number (e.g. 1, 2, 3)")
-    out_file  = _prompt("Output path   (Enter = auto-name)", default="") or None
+    prompt_n = _ask("Prompt number (e.g. 1, 2, 3)")
+    out_file = _ask("Output path   (Enter = auto-name)", default="") or None
 
-    plot_bar_chart(dataset, img_type, prompt_n, out_file)
+    if mode == 'A':
+        img_type = _ask("Image type (e.g. weakblur, strongblur, mediumcolor)")
+        plot_mode_a(dataset, img_type, prompt_n, out_file)
+
+    else:  # Mode B
+        print("  Enter image types separated by commas,")
+        print("  e.g.: weakblur, strongblur, mediumcolor, original")
+        raw = _ask("Image types")
+        img_types = [t.strip() for t in raw.split(',') if t.strip()]
+        if not img_types:
+            print("  ERROR: no image types provided"); return
+        plot_mode_b(dataset, img_types, prompt_n, out_file)
 
 
 if __name__ == "__main__":
