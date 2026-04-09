@@ -902,10 +902,10 @@ def plot_mode_c(dataset_type: str, orig_type: str, comp_types: list,
 
     # Y 轴：以 0 为中心，固定刻度，上下各留空间给括号和负 CI
     y_top = y_bracket_base + (max_level + 1) * BRACKET_GAP + 0.04
-    y_top = max(y_top, 0.50)
-    y_bot = min(-max_abs_ci - 0.04, -0.50)
+    y_top = max(y_top, 0.25)
+    y_bot = min(-max_abs_ci - 0.04, -0.25)
     ax.set_ylim(y_bot, y_top)
-    ax.set_yticks([-0.4, -0.2, 0, 0.2, 0.4])
+    ax.set_yticks([-0.2, -0.1, 0, 0.1, 0.2])
     ax.yaxis.set_major_formatter(plt.FuncFormatter(lambda v, _: f'{v:+.2f}'))
 
     ax.tick_params(axis='y', labelsize=8)
