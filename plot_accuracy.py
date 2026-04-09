@@ -333,14 +333,17 @@ def _sig_legend_lines():
 
 
 def _apply_common_style(ax):
+    """Y 轴固定刻度 0/0.25/0.50/0.75/1.00，隐藏上/右边框，加横向虚线网格。"""
+    ax.set_yticks([0, 0.25, 0.50, 0.75, 1.00])
     ax.yaxis.set_major_formatter(plt.FuncFormatter(lambda v, _: f'{v:.2f}'))
-    ax.grid(axis='y', linestyle='--', alpha=0.35, zorder=0)
+    ax.set_ylim(0, 1.00)
+    ax.tick_params(axis='y', labelsize=8)
+    ax.tick_params(axis='x', labelsize=8)
+    ax.grid(axis='y', linestyle='--', alpha=0.4, zorder=0)
     ax.spines['top'].set_visible(False)
     ax.spines['right'].set_visible(False)
     ax.spines['left'].set_alpha(0.5)
     ax.spines['bottom'].set_alpha(0.5)
-    ax.tick_params(axis='y', labelsize=11)
-    ax.set_ylabel('Accuracy', fontsize=13, labelpad=8)
 
 
 # ================================================================
@@ -400,64 +403,26 @@ def plot_mode_a(dataset_type: str, image_type: str,
     ax.set_facecolor('#FAFAFA')
 
     x         = np.arange(n_models, dtype=float)
-    bar_width = 0.52
-    max_ci_hi = 0.0
+    bar_width = 0.58
 
     for idx, model in enumerate(models):
         r      = results[model]
         acc    = r['acc']
         err_dn = acc - r['ci_lo']
         err_up = r['ci_hi'] - acc
-        max_ci_hi = max(max_ci_hi, r['ci_hi'])
 
         ax.bar(x[idx], acc, width=bar_width,
                color=MODEL_COLORS.get(model, '#888888'),
                alpha=0.90, edgecolor='white', linewidth=0.8, zorder=3)
         ax.errorbar(x[idx], acc, yerr=[[err_dn], [err_up]],
                     fmt='none', ecolor='#111111',
-                    elinewidth=2.2, capsize=8, capthick=2.2, zorder=4)
-        ax.text(x[idx], r['ci_hi'] + 0.013, f'{acc:.3f}',
-                ha='center', va='bottom',
-                fontsize=11, fontweight='bold', color='#111111', zorder=5)
-
-    # Significance brackets — stacked by pair span distance
-    BRACKET_H   = 0.018
-    BRACKET_GAP = 0.050
-    y0 = max_ci_hi + 0.060
-
-    dist_groups: dict = {}
-    for (i, j) in pairs:
-        dist_groups.setdefault(j - i, []).append((i, j))
-
-    level = 0
-    for dist in sorted(dist_groups):
-        for (i, j) in dist_groups[dist]:
-            _draw_bracket(ax, x[i], x[j],
-                          y0 + level * BRACKET_GAP,
-                          BRACKET_H, pstats[(i, j)]['sig'], fontsize=9)
-            level += 1
+                    elinewidth=1.5, capsize=5, capthick=1.5, zorder=4)
 
     # ── Axes ─────────────────────────────────────────────────────
     ax.set_xticks(x)
-    ax.set_xticklabels([MODEL_NAMES[m] for m in models],
-                       fontsize=13, fontweight='bold')
-    ax.set_xlim(-0.55, n_models - 0.45)
-    ax.set_ylim(0, y0 + level * BRACKET_GAP + 0.08)
-    ax.set_title(
-        f"Model Accuracy Comparison\n"
-        f"Dataset: {dataset_type.upper()}   |   Image type: {image_type}   |   Prompt: {prompt_num}",
-        fontsize=14, fontweight='bold', pad=14
-    )
+    ax.set_xticklabels([MODEL_NAMES[m] for m in models])
+    ax.set_xlim(-0.6, n_models - 0.4)
     _apply_common_style(ax)
-
-    model_patches = [
-        mpatches.Patch(color=MODEL_COLORS.get(m, '#888888'), alpha=0.90,
-                       label=MODEL_NAMES[m])
-        for m in models
-    ]
-    ax.legend(handles=model_patches + _sig_legend_lines(),
-              loc='upper right', fontsize=9,
-              framealpha=0.90, edgecolor='#cccccc', handlelength=1.2)
 
     plt.tight_layout()
 
@@ -574,82 +539,14 @@ def plot_mode_b(dataset_type: str, image_types: list, prompt_num: str,
             ax.errorbar(xc, acc,
                         yerr=[[acc - r['ci_lo']], [r['ci_hi'] - acc]],
                         fmt='none', ecolor='#111111',
-                        elinewidth=1.6, capsize=4, capthick=1.6, zorder=4)
-            # Small accuracy label above CI bar
-            ax.text(xc, r['ci_hi'] + 0.010, f'{acc:.3f}',
-                    ha='center', va='bottom',
-                    fontsize=6.5, fontweight='bold', color='#111111',
-                    rotation=90, zorder=5)
-
-    # ── Significance brackets (within groups, significant only) ──
-    BRACKET_H   = 0.015
-    BRACKET_GAP = 0.044
-    y0 = max_ci_hi + 0.055   # common baseline for all groups
-
-    for g_idx, img_type in enumerate(image_types):
-        # Collect significant pairs for this group, sort by span distance
-        dist_groups: dict = {}
-        for (i, j) in pairs:
-            key = (img_type, i, j)
-            if key not in pstats or pstats[key]['sig'] == 'ns':
-                continue
-            dist_groups.setdefault(j - i, []).append((i, j))
-
-        level = 0
-        for dist in sorted(dist_groups):
-            for (i, j) in dist_groups[dist]:
-                x1 = group_centers[g_idx] + offsets[i]
-                x2 = group_centers[g_idx] + offsets[j]
-                _draw_bracket(ax, x1, x2,
-                              y0 + level * BRACKET_GAP,
-                              BRACKET_H, pstats[(img_type, i, j)]['sig'],
-                              fontsize=8)
-                level += 1
+                        elinewidth=1.2, capsize=3, capthick=1.2, zorder=4)
 
     # ── Axes ─────────────────────────────────────────────────────
     ax.set_xticks(group_centers)
-    ax.set_xticklabels(image_types, fontsize=12, fontweight='bold')
+    ax.set_xticklabels(image_types)
     ax.set_xlim(group_centers[0] - group_step * 0.55,
                 group_centers[-1] + group_step * 0.55)
-
-    # Dynamic y_max: enough room for any bracket stack
-    max_bracket_levels = max(
-        (sum(
-            1 for (i, j) in pairs
-            if (img_type, i, j) in pstats and pstats[(img_type, i, j)]['sig'] != 'ns'
-        ) for img_type in image_types),
-        default=0
-    )
-    ax.set_ylim(0, y0 + max_bracket_levels * BRACKET_GAP + 0.10)
-
-    ax.set_title(
-        f"Model Accuracy Comparison by Image Type\n"
-        f"Dataset: {dataset_type.upper()}   |   Prompt: {prompt_num}",
-        fontsize=14, fontweight='bold', pad=14
-    )
     _apply_common_style(ax)
-
-    # ── Legend ───────────────────────────────────────────────────
-    model_patches = [
-        mpatches.Patch(color=MODEL_COLORS.get(m, '#888888'), alpha=0.90,
-                       label=MODEL_NAMES[m])
-        for m in all_models
-    ]
-    extra = [
-        Line2D([], [], color='none', label=''),
-        Line2D([], [], color='none', label='Significance (McNemar,'),
-        Line2D([], [], color='none', label='Bonferroni corrected):'),
-        Line2D([], [], color='none', label='  ***  p < 0.001'),
-        Line2D([], [], color='none', label='  **   p < 0.01'),
-        Line2D([], [], color='none', label='  *    p < 0.05'),
-        Line2D([], [], color='none', label='(non-sig. brackets hidden)'),
-        Line2D([], [], color='none', label=''),
-        Line2D([], [], color='none',
-               label=f'Error bars: {int(CI_LEVEL*100)}% CI (bootstrap)'),
-    ]
-    ax.legend(handles=model_patches + extra,
-              loc='upper right', fontsize=9,
-              framealpha=0.90, edgecolor='#cccccc', handlelength=1.2)
 
     plt.tight_layout()
 
