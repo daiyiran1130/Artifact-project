@@ -20,6 +20,8 @@ JSON filename format expected in RESULTS_DIR:
 import os
 import re
 import json
+import subprocess
+import sys
 import numpy as np
 import pandas as pd
 import matplotlib
@@ -69,7 +71,7 @@ RANDOM_SEED = 42
 # ---- Figure output ----
 FIGURE_DPI  = 600
 FIGURE_SIZE = (2000 / FIGURE_DPI, 2250 / FIGURE_DPI)   # → (3.333, 3.75) inches @ 600 dpi = 2000×2250 px
-SHOW_PLOT   = True   # True = PyCharm 里弹窗预览；False = 只保存不弹窗
+SHOW_PLOT   = True   # True = 保存后用系统图片查看器自动打开；False = 只保存
 # ---- 图像保存目录（留空则保存到脚本运行时的当前目录）----
 OUTPUT_DIR  = ""     # 例如改成 r"D:\work\artifact photo\charts" 则固定存到该文件夹
 
@@ -298,6 +300,21 @@ def sig_label(p_raw: float, n_tests: int = 1) -> tuple:
     return "ns", p_adj
 
 
+def _save_and_open(fig, output_path: str):
+    """保存图像；若 SHOW_PLOT=True 则用系统默认程序自动打开（不弹 matplotlib 窗口）。"""
+    plt.savefig(output_path, dpi=FIGURE_DPI, bbox_inches='tight', facecolor='white')
+    plt.close(fig)
+    abs_path = os.path.abspath(output_path)
+    print(f"\n  ✓ Saved → {abs_path}")
+    if SHOW_PLOT:
+        if sys.platform == 'win32':
+            os.startfile(abs_path)                          # Windows：用照片/画图打开
+        elif sys.platform == 'darwin':
+            subprocess.run(['open', abs_path])              # macOS
+        else:
+            subprocess.run(['xdg-open', abs_path])         # Linux
+
+
 # ================================================================
 # PLOTTING — shared helpers
 # ================================================================
@@ -413,7 +430,7 @@ def plot_mode_a(dataset_type: str, image_type: str,
 
         ax.bar(x[idx], acc, width=bar_width,
                color=MODEL_COLORS.get(model, '#888888'),
-               alpha=0.90, edgecolor='white', linewidth=0.8, zorder=3)
+               alpha=0.90, edgecolor='none', linewidth=0.8, zorder=3)
         ax.errorbar(x[idx], acc, yerr=[[err_dn], [err_up]],
                     fmt='none', ecolor='#111111',
                     elinewidth=1.5, capsize=5, capthick=1.5, zorder=4)
@@ -429,11 +446,7 @@ def plot_mode_a(dataset_type: str, image_type: str,
     if output_path is None:
         fname = f"chart_A_{dataset_type}_{image_type}_prompt{prompt_num}.png"
         output_path = os.path.join(OUTPUT_DIR, fname) if OUTPUT_DIR else fname
-    plt.savefig(output_path, dpi=FIGURE_DPI, bbox_inches='tight', facecolor='white')
-    print(f"\n  ✓ Saved → {os.path.abspath(output_path)}")
-    if SHOW_PLOT:
-        plt.show()
-    plt.close(fig)
+    _save_and_open(fig, output_path)
 
 
 # ================================================================
@@ -535,7 +548,7 @@ def plot_mode_b(dataset_type: str, image_types: list, prompt_num: str,
 
             ax.bar(xc, acc, width=bar_width * 0.88,
                    color=MODEL_COLORS.get(model, '#888888'),
-                   alpha=0.90, edgecolor='white', linewidth=0.5, zorder=3)
+                   alpha=0.90, edgecolor='none', linewidth=0.5, zorder=3)
             ax.errorbar(xc, acc,
                         yerr=[[acc - r['ci_lo']], [r['ci_hi'] - acc]],
                         fmt='none', ecolor='#111111',
@@ -554,11 +567,7 @@ def plot_mode_b(dataset_type: str, image_types: list, prompt_num: str,
         img_str = '_'.join(image_types)
         fname = f"chart_B_{dataset_type}_{img_str}_prompt{prompt_num}.png"
         output_path = os.path.join(OUTPUT_DIR, fname) if OUTPUT_DIR else fname
-    plt.savefig(output_path, dpi=FIGURE_DPI, bbox_inches='tight', facecolor='white')
-    print(f"\n  ✓ Saved → {os.path.abspath(output_path)}")
-    if SHOW_PLOT:
-        plt.show()
-    plt.close(fig)
+    _save_and_open(fig, output_path)
 
 
 # ================================================================
