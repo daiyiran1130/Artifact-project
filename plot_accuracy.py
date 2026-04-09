@@ -339,7 +339,7 @@ def _apply_common_style(ax):
     ax.set_ylim(0, 1.00)
     ax.tick_params(axis='y', labelsize=8)
     ax.tick_params(axis='x', labelsize=8)
-    ax.grid(axis='y', linestyle='--', alpha=0.4, zorder=0)
+    # ax.grid(axis='y', linestyle='--', alpha=0.4, zorder=0)  # 网格已关闭
     ax.spines['top'].set_visible(False)
     ax.spines['right'].set_visible(False)
     ax.spines['left'].set_alpha(0.5)
@@ -420,7 +420,7 @@ def plot_mode_a(dataset_type: str, image_type: str,
 
     # ── Axes ─────────────────────────────────────────────────────
     ax.set_xticks(x)
-    ax.set_xticklabels([MODEL_NAMES[m] for m in models])
+    ax.set_xticklabels([])          # Mode A：不显示横轴模型名，靠颜色区分
     ax.set_xlim(-0.6, n_models - 0.4)
     _apply_common_style(ax)
 
@@ -543,7 +543,7 @@ def plot_mode_b(dataset_type: str, image_types: list, prompt_num: str,
 
     # ── Axes ─────────────────────────────────────────────────────
     ax.set_xticks(group_centers)
-    ax.set_xticklabels(image_types)
+    ax.set_xticklabels(image_types)  # Mode B：保留图像类型名
     ax.set_xlim(group_centers[0] - group_step * 0.55,
                 group_centers[-1] + group_step * 0.55)
     _apply_common_style(ax)
