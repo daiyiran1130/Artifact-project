@@ -520,8 +520,8 @@ def plot_mode_b(dataset_type: str, image_types: list, prompt_num: str,
 
     # ── Figure layout ─────────────────────────────────────────────
     n_groups    = len(image_types)
-    bar_width   = 0.16          # each individual bar
-    group_gap   = 0.45          # gap between groups (in data units)
+    bar_width   = 0.12          # each individual bar (narrower)
+    group_gap   = 0.22          # gap between groups (tighter)
     inner_span  = n_models * bar_width   # total width of bars in one group
     group_step  = inner_span + group_gap # center-to-center distance between groups
 
@@ -530,7 +530,7 @@ def plot_mode_b(dataset_type: str, image_types: list, prompt_num: str,
                         for k in range(n_models)])
     group_centers = np.arange(n_groups) * group_step
 
-    fig_width = max(FIGURE_SIZE[0], n_groups * 3.2)
+    fig_width = max(FIGURE_SIZE[0], n_groups * 1.8)  # 每组占 1.8 寸，不会过扁长
     fig, ax = plt.subplots(figsize=(fig_width, FIGURE_SIZE[1]), dpi=FIGURE_DPI)
     fig.patch.set_facecolor('white')
     ax.set_facecolor('#FAFAFA')
@@ -556,7 +556,17 @@ def plot_mode_b(dataset_type: str, image_types: list, prompt_num: str,
 
     # ── Axes ─────────────────────────────────────────────────────
     ax.set_xticks(group_centers)
-    ax.set_xticklabels(image_types)  # Mode B：保留图像类型名
+    # 去掉 weak/medium/strong/original 前缀，只显示类型词（blur/color/light 等）
+    _prefixes = ('weak', 'medium', 'strong', 'original')
+    short_labels = []
+    for t in image_types:
+        label = t
+        for p in _prefixes:
+            if t.lower().startswith(p):
+                label = t[len(p):] or t   # 若去掉后为空则保留原名
+                break
+        short_labels.append(label)
+    ax.set_xticklabels(short_labels)
     ax.set_xlim(group_centers[0] - group_step * 0.55,
                 group_centers[-1] + group_step * 0.55)
     _apply_common_style(ax)
