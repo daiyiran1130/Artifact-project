@@ -350,13 +350,11 @@ def _sig_legend_lines():
 
 
 def _apply_common_style(ax):
-    """Y 轴固定刻度 0/0.25/0.50/0.75/1.00，隐藏上/右边框，加横向虚线网格。"""
+    """Y 轴固定刻度 0/0.25/0.50/0.75/1.00，隐藏上/右边框。ylim 由各绘图函数单独设置。"""
     ax.set_yticks([0, 0.25, 0.50, 0.75, 1.00])
     ax.yaxis.set_major_formatter(plt.FuncFormatter(lambda v, _: f'{v:.2f}'))
-    ax.set_ylim(0, 1.00)
     ax.tick_params(axis='y', labelsize=8)
     ax.tick_params(axis='x', labelsize=8, length=0)  # length=0 隐藏 x 轴刻度线
-    # ax.grid(axis='y', linestyle='--', alpha=0.4, zorder=0)  # 网格已关闭
     ax.spines['top'].set_visible(False)
     ax.spines['right'].set_visible(False)
     ax.spines['left'].set_alpha(0.5)
@@ -435,10 +433,32 @@ def plot_mode_a(dataset_type: str, image_type: str,
                     fmt='none', ecolor='#111111',
                     elinewidth=1.5, capsize=5, capthick=1.5, zorder=4)
 
+    # ── 显著性括号（只画 * / ** / ***，ns 不画）────────────────────
+    max_ci_hi = max(results[m]['ci_hi'] for m in models)
+    BRACKET_H   = 0.018
+    BRACKET_GAP = 0.048
+    y0 = max_ci_hi + 0.04
+
+    dist_groups: dict = {}
+    for (i, j) in pairs:
+        if pstats[(i, j)]['sig'] != 'ns':
+            dist_groups.setdefault(j - i, []).append((i, j))
+
+    level = 0
+    for dist in sorted(dist_groups):
+        for (i, j) in dist_groups[dist]:
+            _draw_bracket(ax, x[i], x[j],
+                          y0 + level * BRACKET_GAP,
+                          BRACKET_H, pstats[(i, j)]['sig'], fontsize=7)
+            level += 1
+
+    y_max = y0 + max(level, 1) * BRACKET_GAP + 0.05
+
     # ── Axes ─────────────────────────────────────────────────────
     ax.set_xticks(x)
     ax.set_xticklabels([])          # Mode A：不显示横轴模型名，靠颜色区分
     ax.set_xlim(-0.6, n_models - 0.4)
+    ax.set_ylim(0, max(1.00, y_max))
     _apply_common_style(ax)
 
     plt.tight_layout()
@@ -554,6 +574,33 @@ def plot_mode_b(dataset_type: str, image_types: list, prompt_num: str,
                         fmt='none', ecolor='#111111',
                         elinewidth=1.2, capsize=3, capthick=1.2, zorder=4)
 
+    # ── 显著性括号（组内，只画显著的，ns 不画）─────────────────────
+    BRACKET_H   = 0.015
+    BRACKET_GAP = 0.042
+    y0_bracket  = max_ci_hi + 0.04
+
+    max_level = 0
+    for g_idx, img_type in enumerate(image_types):
+        dist_groups: dict = {}
+        for (i, j) in pairs:
+            key = (img_type, i, j)
+            if key in pstats and pstats[key]['sig'] != 'ns':
+                dist_groups.setdefault(j - i, []).append((i, j))
+
+        level = 0
+        for dist in sorted(dist_groups):
+            for (i, j) in dist_groups[dist]:
+                x1 = group_centers[g_idx] + offsets[i]
+                x2 = group_centers[g_idx] + offsets[j]
+                _draw_bracket(ax, x1, x2,
+                              y0_bracket + level * BRACKET_GAP,
+                              BRACKET_H, pstats[(img_type, i, j)]['sig'],
+                              fontsize=6)
+                level += 1
+        max_level = max(max_level, level)
+
+    y_max = y0_bracket + max(max_level, 1) * BRACKET_GAP + 0.05
+
     # ── Axes ─────────────────────────────────────────────────────
     ax.set_xticks(group_centers)
     # 去掉 weak/medium/strong/original 前缀，只显示类型词（blur/color/light 等）
@@ -569,6 +616,7 @@ def plot_mode_b(dataset_type: str, image_types: list, prompt_num: str,
     ax.set_xticklabels(short_labels)
     ax.set_xlim(group_centers[0] - group_step * 0.55,
                 group_centers[-1] + group_step * 0.55)
+    ax.set_ylim(0, max(1.00, y_max))
     _apply_common_style(ax)
 
     plt.tight_layout()
