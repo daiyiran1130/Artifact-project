@@ -70,7 +70,7 @@ RANDOM_SEED = 42
 
 # ---- Figure output ----
 FIGURE_DPI  = 600
-FIGURE_SIZE = (2000 / FIGURE_DPI, 2250 / FIGURE_DPI)   # → (3.333, 3.75) inches @ 600 dpi = 2000×2250 px
+FIGURE_SIZE = (2000 / FIGURE_DPI, 1200 / FIGURE_DPI)   # → (3.333, 2.00) inches @ 600 dpi = 2000×1200 px
 SHOW_PLOT   = True   # True = 保存后用系统图片查看器自动打开；False = 只保存
 # ---- 图像保存目录（留空则保存到脚本运行时的当前目录）----
 OUTPUT_DIR  = ""     # 例如改成 r"D:\work\artifact photo\charts" 则固定存到该文件夹
