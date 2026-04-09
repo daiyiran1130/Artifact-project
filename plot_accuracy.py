@@ -192,13 +192,61 @@ def load_ground_truth(dataset_type: str) -> dict:
     return {i + 1: str(df.iloc[i, 1]).strip() for i in range(len(df))}
 
 
+def _regex_extract_pairs(content: str) -> dict:
+    """
+    逐行提取 "数字": "值" 格式的键值对，用于解析格式混乱的 JSON 文件。
+    处理：
+      - 键值对之间夹杂的裸文本行（直接跳过）
+      - 字符串内用 ""word"" 代替标准 \"word\" 的双引号写法
+    """
+    result = {}
+    for line in content.splitlines():
+        # 匹配形如  "123": "...任意内容...",  的行（末尾逗号可选）
+        m = re.match(r'\s*"(\d+)"\s*:\s*"(.+)"[,]?\s*$', line.strip())
+        if m:
+            key   = m.group(1)
+            value = m.group(2).replace('""', '"')   # ""word"" → "word"
+            result[key] = value
+    return result
+
+
 def load_json_results(filepath: str, dataset_type: str) -> dict:
     """
     Load a model results JSON file.
     Returns {image_id (int): predicted_label (str)}.
+
+    解析策略（依次尝试）：
+      1. 标准 json.loads()
+      2. raw_decode()  — 处理末尾有多余内容的情况
+      3. 正则逐行提取 — 处理键值对之间夹杂裸文本的情况
     """
     with open(filepath, 'r', encoding='utf-8') as f:
-        data = json.load(f)
+        content = f.read()
+
+    fname = os.path.basename(filepath)
+    data  = None
+
+    # ── 策略 1：标准解析 ────────────────────────────────────────────
+    try:
+        data = json.loads(content)
+    except json.JSONDecodeError:
+        pass
+
+    # ── 策略 2：raw_decode（忽略末尾多余内容）──────────────────────
+    if data is None:
+        try:
+            data, _ = json.JSONDecoder().raw_decode(content.strip())
+        except json.JSONDecodeError:
+            pass
+
+    # ── 策略 3：正则逐行提取（文件格式严重混乱时）──────────────────
+    if data is None:
+        data = _regex_extract_pairs(content)
+        if data:
+            print(f"    [Info] {fname}: 使用正则回退解析器，提取到 {len(data)} 条记录")
+        else:
+            print(f"    [Error] {fname}: 三种解析方式均失败，跳过此文件")
+            return {}
 
     parsed = {}
     failed = []
@@ -211,7 +259,6 @@ def load_json_results(filepath: str, dataset_type: str) -> dict:
             failed.append(img_id)
 
     if failed:
-        fname = os.path.basename(filepath)
         print(f"    [Warning] {fname}: could not parse {len(failed)} entries "
               f"(IDs: {failed[:5]}{'…' if len(failed) > 5 else ''})")
     return parsed
