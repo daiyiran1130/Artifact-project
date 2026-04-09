@@ -324,7 +324,7 @@ def _draw_bracket(ax, x1, x2, y_base, bar_h, text, fontsize=9):
     ax.plot(
         [x1, x1, x2, x2],
         [y_base, y_base + bar_h, y_base + bar_h, y_base],
-        lw=0.7, color='#333333', clip_on=False
+        lw=0.35, color='#333333', clip_on=False
     )
     ax.text(
         (x1 + x2) / 2, y_base + bar_h + 0.004,
@@ -431,7 +431,7 @@ def plot_mode_a(dataset_type: str, image_type: str,
                alpha=0.90, edgecolor='none', linewidth=0.8, zorder=3)
         ax.errorbar(x[idx], acc, yerr=[[err_dn], [err_up]],
                     fmt='none', ecolor='#111111',
-                    elinewidth=0.7, capsize=4, capthick=0.7, zorder=4)
+                    elinewidth=0.35, capsize=4, capthick=0.35, zorder=4)
 
     # ── 显著性括号（只画 * / ** / ***，ns 不画）────────────────────
     max_ci_hi = max(results[m]['ci_hi'] for m in models)
@@ -572,7 +572,7 @@ def plot_mode_b(dataset_type: str, image_types: list, prompt_num: str,
             ax.errorbar(xc, acc,
                         yerr=[[acc - r['ci_lo']], [r['ci_hi'] - acc]],
                         fmt='none', ecolor='#111111',
-                        elinewidth=0.7, capsize=2, capthick=0.7, zorder=4)
+                        elinewidth=0.35, capsize=2, capthick=0.35, zorder=4)
 
     # ── 显著性括号（组内，只画显著的，ns 不画）─────────────────────
     BRACKET_H   = 0.015
