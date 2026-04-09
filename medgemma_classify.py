@@ -22,6 +22,7 @@ MODEL_PATH  = Path('/root/autodl-tmp/modelscope_cache/google/medgemma-27b-it')
 IMAGE_DIR   = Path('/root/autodl-tmp/oct/original')
 OCT_LABELS  = Path('/root/octlabel.csv')
 OUTPUT_FILE = IMAGE_DIR / 'results.json'   # 准确率汇总，固定保存在图片目录下
+BATCH_SIZE  = 8
 
 # 合法标签集合（小写）
 OCT_VALID = {
@@ -87,27 +88,31 @@ def extract_number(filename: str):
     return int(match.group()) if match else None
 
 
-def query_model(image_path: Path, prompt: str) -> str:
-    """对单张图片调用本地 MedGemma 模型，返回完整原始输出文本（不限制 token 数）。"""
-    image = Image.open(image_path).convert('RGB')
-    messages = [
-        {
-            'role': 'user',
-            'content': [
-                {'type': 'image', 'image': image},
-                {'type': 'text',  'text': prompt},
-            ],
-        }
+def query_model_batch(batch_paths: list, prompt: str) -> list:
+    """
+    对一批图片并行推理，返回各图片的原始输出文本列表（顺序与 batch_paths 一致）。
+    使用 left-padding 对齐输入，generation[i][input_len:] 提取每张图的新生成 token。
+    """
+    images = [Image.open(p).convert('RGB') for p in batch_paths]
+
+    batch_messages = [
+        [{'role': 'user', 'content': [
+            {'type': 'image', 'image': img},
+            {'type': 'text',  'text': prompt},
+        ]}]
+        for img in images
     ]
+
     inputs = processor.apply_chat_template(
-        messages,
+        batch_messages,
         add_generation_prompt=True,
         tokenize=True,
         return_dict=True,
         return_tensors='pt',
+        padding=True,
     )
     inputs    = {k: v.to(model.device) for k, v in inputs.items()}
-    input_len = inputs['input_ids'].shape[-1]
+    input_len = inputs['input_ids'].shape[-1]   # left-padding 后统一长度
 
     with torch.inference_mode():
         generation = model.generate(
@@ -115,9 +120,12 @@ def query_model(image_path: Path, prompt: str) -> str:
             do_sample=False,
         )
 
-    new_tokens = generation[0][input_len:]
-    decoded    = processor.decode(new_tokens, skip_special_tokens=True)
-    return decoded.strip()
+    outputs = []
+    for i in range(len(batch_paths)):
+        new_tokens = generation[i][input_len:]
+        decoded    = processor.decode(new_tokens, skip_special_tokens=True)
+        outputs.append(decoded.strip())
+    return outputs
 
 
 def save_predictions(path: Path, results: dict) -> None:
@@ -263,19 +271,27 @@ def main():
 
         print(f'  Output -> {pred_file}')
 
-        for idx, (num, img_path) in enumerate(numbered, start=1):
-            key = str(num)
-            print(f'  [{idx}/{total}] {img_path.name} ...', end=' ', flush=True)
-            try:
-                raw              = query_model(img_path, prompt)
-                predictions[key] = raw
-                preview          = raw[:120].replace('\n', ' ')
-                print(f'-> {preview}{"..." if len(raw) > 120 else ""}')
-            except Exception as e:
-                print(f'\n  [ERROR] {e}')
-                predictions[key] = f'error: {e}'
+        # 按 BATCH_SIZE 分批处理
+        for batch_start in range(0, total, BATCH_SIZE):
+            batch        = numbered[batch_start:batch_start + BATCH_SIZE]
+            batch_nums   = [num for num, _ in batch]
+            batch_paths  = [p   for _, p  in batch]
+            batch_end    = batch_start + len(batch)
 
-            # 每张处理完立即保存，防止中途崩溃丢失进度
+            print(f'  [{batch_start + 1}-{batch_end}/{total}] '
+                  f'{[p.name for p in batch_paths]} ...', flush=True)
+            try:
+                raws = query_model_batch(batch_paths, prompt)
+                for num, raw in zip(batch_nums, raws):
+                    predictions[str(num)] = raw
+                    preview = raw[:100].replace('\n', ' ')
+                    print(f'    #{num} -> {preview}{"..." if len(raw) > 100 else ""}')
+            except Exception as e:
+                print(f'\n  [ERROR] batch {batch_start + 1}-{batch_end}: {e}')
+                for num in batch_nums:
+                    predictions[str(num)] = f'error: {e}'
+
+            # 每批处理完立即保存，防止中途崩溃丢失进度
             save_predictions(pred_file, predictions)
 
         print(f'  Saved {len(predictions)} predictions -> {pred_file}')
