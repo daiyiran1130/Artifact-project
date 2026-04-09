@@ -1,8 +1,9 @@
 """
 OCT image classification using local MedGemma-27b-it via transformers.
 Processes images in /root/autodl-tmp/oct/original with 3 prompts each,
-calculates accuracy against /root/octlabel.csv, and saves all results
-(predictions + accuracy stats) to results.json.
+calculates accuracy against /root/octlabel.csv, and saves:
+  - Per-prompt predictions : IMAGE_DIR/{1,2,3}_oct_original.json
+  - Accuracy summary        : IMAGE_DIR/results.json
 """
 
 import re
@@ -20,7 +21,7 @@ from transformers import AutoProcessor, AutoModelForImageTextToText
 MODEL_PATH  = Path('/root/autodl-tmp/modelscope_cache/google/medgemma-27b-it')
 IMAGE_DIR   = Path('/root/autodl-tmp/oct/original')
 OCT_LABELS  = Path('/root/octlabel.csv')
-OUTPUT_FILE = Path('results.json')
+OUTPUT_FILE = IMAGE_DIR / 'results.json'   # 准确率汇总，固定保存在图片目录下
 
 # 合法标签集合（小写）
 OCT_VALID = {
@@ -122,6 +123,17 @@ def query_model(image_path: Path, prompt: str, max_new_tokens: int = 100) -> str
     return decoded.strip()
 
 
+def save_predictions(path: Path, results: dict) -> None:
+    """按编号升序将预测结果写入 JSON，每条记录占一行（与 gpt_classify.py 格式一致）。"""
+    with open(path, 'w', encoding='utf-8') as f:
+        f.write('{\n')
+        items = sorted(results.items(), key=lambda kv: int(kv[0]))
+        for i, (k, v) in enumerate(items):
+            comma = ',' if i < len(items) - 1 else ''
+            f.write(f'  "{k}": {json.dumps(v, ensure_ascii=False)}{comma}\n')
+        f.write('}\n')
+
+
 def normalize_prediction(raw: str, valid_labels: set):
     """
     从模型输出提取分类标签。
@@ -206,7 +218,7 @@ def main():
     print(f'Model  : {MODEL_PATH}')
     print(f'Images : {IMAGE_DIR}')
     print(f'Labels : {OCT_LABELS}')
-    print(f'Output : {OUTPUT_FILE}\n')
+    print(f'Output : {IMAGE_DIR}/{{1,2,3}}_oct_original.json  +  {OUTPUT_FILE}\n')
 
     # 加载模型
     print('Loading processor ...')
@@ -240,16 +252,20 @@ def main():
     print(f'Found {len(numbered)} images in {IMAGE_DIR}\n')
 
     # 3 种提示词逐轮分类
-    all_results = {}
+    accuracy_summary = {}
 
     for prompt_idx, prompt in OCT_PROMPTS.items():
         print(f'\n{"#" * 60}')
         print(f'  PROMPT {prompt_idx}/3')
         print(f'{"#" * 60}\n')
 
+        # 每种提示词的预测结果存入独立文件，命名与 gpt_classify.py 一致
+        pred_file   = IMAGE_DIR / f'{prompt_idx}_oct_original.json'
         max_tokens  = MAX_NEW_TOKENS[prompt_idx]
         predictions = {}
         total       = len(numbered)
+
+        print(f'  Output -> {pred_file}')
 
         for idx, (num, img_path) in enumerate(numbered, start=1):
             key = str(num)
@@ -263,6 +279,11 @@ def main():
                 print(f'\n  [ERROR] {e}')
                 predictions[key] = f'error: {e}'
 
+            # 每张处理完立即保存，防止中途崩溃丢失进度
+            save_predictions(pred_file, predictions)
+
+        print(f'  Saved {len(predictions)} predictions -> {pred_file}')
+
         # 计算本轮准确率
         acc_stats   = calculate_accuracy(predictions, oct_labels, OCT_VALID)
         valid_total = acc_stats['correct'] + acc_stats['incorrect']
@@ -270,25 +291,21 @@ def main():
               f'  ({acc_stats["correct"]}/{valid_total} valid,'
               f'  no_match={acc_stats["no_match"]}, errors={acc_stats["errors"]})')
 
-        all_results[f'prompt_{prompt_idx}'] = {
-            'predictions': predictions,
-            'accuracy':    acc_stats,
-        }
+        accuracy_summary[f'prompt_{prompt_idx}'] = acc_stats
 
-    # 保存结果
+    # 保存准确率汇总到 results.json
     output = {
         'model':     str(MODEL_PATH),
         'image_dir': str(IMAGE_DIR),
-        'results':   all_results,
+        'accuracy':  accuracy_summary,
     }
     with open(OUTPUT_FILE, 'w', encoding='utf-8') as f:
         json.dump(output, f, ensure_ascii=False, indent=2)
-    print(f'\nResults saved -> {OUTPUT_FILE}')
+    print(f'\nAccuracy summary saved -> {OUTPUT_FILE}')
 
-    # 准确率汇总
+    # 打印汇总
     print('\n=== Accuracy Summary ===')
-    for prompt_key, data in all_results.items():
-        acc   = data['accuracy']
+    for prompt_key, acc in accuracy_summary.items():
         valid = acc['correct'] + acc['incorrect']
         print(f'{prompt_key:10s}  acc={acc["accuracy"]}  ({acc["correct"]}/{valid})')
         for cls, stat in acc['per_class_accuracy'].items():
