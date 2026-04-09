@@ -338,7 +338,7 @@ def _apply_common_style(ax):
     ax.yaxis.set_major_formatter(plt.FuncFormatter(lambda v, _: f'{v:.2f}'))
     ax.set_ylim(0, 1.00)
     ax.tick_params(axis='y', labelsize=8)
-    ax.tick_params(axis='x', labelsize=8)
+    ax.tick_params(axis='x', labelsize=8, length=0)  # length=0 隐藏 x 轴刻度线
     # ax.grid(axis='y', linestyle='--', alpha=0.4, zorder=0)  # 网格已关闭
     ax.spines['top'].set_visible(False)
     ax.spines['right'].set_visible(False)
