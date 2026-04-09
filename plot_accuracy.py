@@ -67,8 +67,8 @@ CI_LEVEL    = 0.95
 RANDOM_SEED = 42
 
 # ---- Figure output ----
-FIGURE_DPI  = 300
-FIGURE_SIZE = (11, 7)   # inches (width, height)
+FIGURE_DPI  = 600
+FIGURE_SIZE = (2000 / FIGURE_DPI, 2250 / FIGURE_DPI)   # → (3.333, 3.75) inches @ 600 dpi = 2000×2250 px
 
 
 # ================================================================
