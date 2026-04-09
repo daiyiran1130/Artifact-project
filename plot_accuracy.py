@@ -441,7 +441,7 @@ def plot_mode_a(dataset_type: str, image_type: str,
 
     dist_groups: dict = {}
     for (i, j) in pairs:
-        if pstats[(i, j)]['sig'] in ('*', '**'):
+        if pstats[(i, j)]['sig'] != '***':
             dist_groups.setdefault(j - i, []).append((i, j))
 
     level = 0
@@ -584,7 +584,7 @@ def plot_mode_b(dataset_type: str, image_types: list, prompt_num: str,
         dist_groups: dict = {}
         for (i, j) in pairs:
             key = (img_type, i, j)
-            if key in pstats and pstats[key]['sig'] in ('*', '**'):
+            if key in pstats and pstats[key]['sig'] != '***':
                 dist_groups.setdefault(j - i, []).append((i, j))
 
         level = 0
