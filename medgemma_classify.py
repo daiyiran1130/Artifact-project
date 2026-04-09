@@ -22,7 +22,8 @@ MODEL_PATH  = Path('/root/autodl-tmp/modelscope_cache/google/medgemma-27b-it')
 IMAGE_DIR   = Path('/root/autodl-tmp/oct/original')
 OCT_LABELS  = Path('/root/octlabel.csv')
 OUTPUT_FILE = IMAGE_DIR / 'results.json'   # 准确率汇总，固定保存在图片目录下
-BATCH_SIZE  = 8
+BATCH_SIZE     = 8
+MAX_NEW_TOKENS = 2048   # 足够大以保证模型完整输出；图像 token 很长，不设此值会被截断
 
 # 合法标签集合（小写）
 OCT_VALID = {
@@ -117,6 +118,7 @@ def query_model_batch(batch_paths: list, prompt: str) -> list:
     with torch.inference_mode():
         generation = model.generate(
             **inputs,
+            max_new_tokens=MAX_NEW_TOKENS,
             do_sample=False,
         )
 
