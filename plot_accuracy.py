@@ -319,6 +319,23 @@ def _save_and_open(fig, output_path: str):
 # PLOTTING — shared helpers
 # ================================================================
 
+def _no_overlap_levels(bracket_list):
+    """
+    bracket_list: [(x1, x2, label), ...] 按跨度从小到大排列
+    返回每条括号应放置的层号，保证同层内无水平重叠。
+    """
+    levels = []
+    occupied = []   # [(level, x1, x2), ...]
+    for (x1, x2, _) in bracket_list:
+        lvl = 0
+        while any(ol == lvl and ox1 < x2 and x1 < ox2
+                  for ol, ox1, ox2 in occupied):
+            lvl += 1
+        levels.append(lvl)
+        occupied.append((lvl, x1, x2))
+    return levels
+
+
 def _draw_bracket(ax, x1, x2, y_base, bar_h, text, fontsize=9):
     """Draw an L-shaped significance bracket between two x positions."""
     ax.plot(
@@ -435,24 +452,25 @@ def plot_mode_a(dataset_type: str, image_type: str,
 
     # ── 显著性括号（只画 * / ** / ***，ns 不画）────────────────────
     max_ci_hi = max(results[m]['ci_hi'] for m in models)
-    BRACKET_H   = 0.018
-    BRACKET_GAP = 0.048
+    BRACKET_H   = 0.016
+    BRACKET_GAP = 0.072   # 层间距（加大避免遮挡）
     y0 = max_ci_hi + 0.04
 
-    dist_groups: dict = {}
-    for (i, j) in pairs:
-        if pstats[(i, j)]['sig'] != '***':
-            dist_groups.setdefault(j - i, []).append((i, j))
+    # 按跨度从小到大排列，只画非 *** 的对
+    to_draw = sorted(
+        [(x[i], x[j], pstats[(i,j)]['sig']) for (i,j) in pairs
+         if pstats[(i,j)]['sig'] != '***'],
+        key=lambda t: t[1] - t[0]
+    )
+    bracket_levels = _no_overlap_levels(to_draw)
+    max_level = max(bracket_levels, default=0)
 
-    level = 0
-    for dist in sorted(dist_groups):
-        for (i, j) in dist_groups[dist]:
-            _draw_bracket(ax, x[i], x[j],
-                          y0 + level * BRACKET_GAP,
-                          BRACKET_H, pstats[(i, j)]['sig'], fontsize=7)
-            level += 1
+    for (bx1, bx2, sig), lvl in zip(to_draw, bracket_levels):
+        _draw_bracket(ax, bx1, bx2,
+                      y0 + lvl * BRACKET_GAP,
+                      BRACKET_H, sig, fontsize=5)
 
-    y_max = y0 + max(level, 1) * BRACKET_GAP + 0.05
+    y_max = y0 + (max_level + 1) * BRACKET_GAP + 0.04
 
     # ── Axes ─────────────────────────────────────────────────────
     ax.set_xticks(x)
@@ -574,32 +592,31 @@ def plot_mode_b(dataset_type: str, image_types: list, prompt_num: str,
                         fmt='none', ecolor='#111111',
                         elinewidth=0.35, capsize=2, capthick=0.35, zorder=4)
 
-    # ── 显著性括号（组内，只画显著的，ns 不画）─────────────────────
-    BRACKET_H   = 0.015
-    BRACKET_GAP = 0.042
+    # ── 显著性括号（组内，只画非 *** 的对）─────────────────────────
+    BRACKET_H   = 0.013
+    BRACKET_GAP = 0.065   # 层间距（加大避免遮挡）
     y0_bracket  = max_ci_hi + 0.04
 
     max_level = 0
     for g_idx, img_type in enumerate(image_types):
-        dist_groups: dict = {}
-        for (i, j) in pairs:
-            key = (img_type, i, j)
-            if key in pstats and pstats[key]['sig'] != '***':
-                dist_groups.setdefault(j - i, []).append((i, j))
+        to_draw = sorted(
+            [(group_centers[g_idx] + offsets[i],
+              group_centers[g_idx] + offsets[j],
+              pstats[(img_type, i, j)]['sig'])
+             for (i, j) in pairs
+             if (img_type, i, j) in pstats
+             and pstats[(img_type, i, j)]['sig'] != '***'],
+            key=lambda t: t[1] - t[0]
+        )
+        bracket_levels = _no_overlap_levels(to_draw)
+        for (bx1, bx2, sig), lvl in zip(to_draw, bracket_levels):
+            _draw_bracket(ax, bx1, bx2,
+                          y0_bracket + lvl * BRACKET_GAP,
+                          BRACKET_H, sig, fontsize=4.5)
+        if bracket_levels:
+            max_level = max(max_level, max(bracket_levels))
 
-        level = 0
-        for dist in sorted(dist_groups):
-            for (i, j) in dist_groups[dist]:
-                x1 = group_centers[g_idx] + offsets[i]
-                x2 = group_centers[g_idx] + offsets[j]
-                _draw_bracket(ax, x1, x2,
-                              y0_bracket + level * BRACKET_GAP,
-                              BRACKET_H, pstats[(img_type, i, j)]['sig'],
-                              fontsize=6)
-                level += 1
-        max_level = max(max_level, level)
-
-    y_max = y0_bracket + max(max_level, 1) * BRACKET_GAP + 0.05
+    y_max = y0_bracket + (max_level + 1) * BRACKET_GAP + 0.04
 
     # ── Axes ─────────────────────────────────────────────────────
     ax.set_xticks(group_centers)
