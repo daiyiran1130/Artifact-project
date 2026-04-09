@@ -70,6 +70,21 @@ RANDOM_SEED = 42
 FIGURE_DPI  = 600
 FIGURE_SIZE = (2000 / FIGURE_DPI, 2250 / FIGURE_DPI)   # → (3.333, 3.75) inches @ 600 dpi = 2000×2250 px
 
+# ----------------------------------------------------------------
+# ★  默认输入值 — 每次运行时的预填项，直接回车即可使用默认值  ★
+# ----------------------------------------------------------------
+# 如果某项留空字符串 ""，运行时就必须手动输入，不能跳过。
+# Mode A：横轴是模型（4 根柱子，对应 1 种图像类型）
+# Mode B：横轴是图像类型（每种图像类型下画 4 个模型的柱子）
+DEFAULT_MODE       = "A"              # 图表模式：填 "A" 或 "B"
+DEFAULT_DATASET    = "fundus"         # 数据集类型：填 "fundus" 或 "oct"
+DEFAULT_PROMPT     = "1"             # 提示词编号：填 "1"、"2"、"3" 等
+DEFAULT_IMAGE_TYPE = "weakblur"       # 【仅 Mode A 用】图像类型，例如 "weakblur"、"strongblur"
+DEFAULT_IMAGE_LIST = "weakblur, strongblur, mediumcolor, original"
+#                                     # 【仅 Mode B 用】多个图像类型，逗号分隔
+DEFAULT_OUTPUT     = ""              # 输出文件路径，留空则自动命名
+# ----------------------------------------------------------------
+
 
 # ================================================================
 # LABEL EXTRACTION  (handles all three JSON formats automatically)
@@ -644,10 +659,11 @@ def plot_mode_b(dataset_type: str, image_types: list, prompt_num: str,
 # MAIN — interactive CLI
 # ================================================================
 
-def _ask(msg: str, default: str = None) -> str:
-    suffix = f" [{default}]" if default else ""
-    raw = input(f"  {msg}{suffix}: ").strip()
-    return raw if raw else (default or raw)
+def _ask(msg: str, default: str = "") -> str:
+    """打印提示并读取输入；直接回车则使用 default 默认值。"""
+    hint = f" [默认: {default}]" if default else ""
+    raw = input(f"  {msg}{hint}: ").strip()
+    return raw if raw else default
 
 
 def main():
@@ -658,33 +674,35 @@ def main():
     print(f"  Models      : {', '.join(MODEL_NAMES.values())}")
     print()
     print("  Chart modes:")
-    print("    A — X-axis = models      (4 bars, 1 image type)")
-    print("    B — X-axis = image types (groups of 4 model bars)")
+    print("    A — 横轴是模型      (4 根柱子，1 种图像类型)")
+    print("    B — 横轴是图像类型  (N 组 × 4 模型柱子)")
+    print()
+    print("  直接回车使用方括号里的默认值；")
+    print("  默认值在脚本顶部 DEFAULT_* 变量处修改。")
     print()
 
-    mode = _ask("Mode (A / B)").upper()
+    # ── 各项输入（括号内显示当前默认值）──────────────────────────
+    mode = _ask("Mode (A / B)", DEFAULT_MODE).upper()
     if mode not in ('A', 'B'):
-        print("  ERROR: mode must be A or B"); return
+        print("  ERROR: 只能填 A 或 B"); return
 
-    dataset = _ask("Dataset type (fundus / oct)").lower()
+    dataset = _ask("Dataset type (fundus / oct)", DEFAULT_DATASET).lower()
     if dataset not in CSV_PATHS:
-        print(f"  ERROR: unknown dataset '{dataset}'. "
-              f"Choose from {list(CSV_PATHS.keys())}"); return
+        print(f"  ERROR: 未知数据集 '{dataset}'，可选: {list(CSV_PATHS.keys())}"); return
 
-    prompt_n = _ask("Prompt number (e.g. 1, 2, 3)")
-    out_file = _ask("Output path   (Enter = auto-name)", default="") or None
+    prompt_n = _ask("Prompt number (提示词编号)", DEFAULT_PROMPT)
+    out_file = _ask("Output path   (留空=自动命名)", DEFAULT_OUTPUT) or None
 
     if mode == 'A':
-        img_type = _ask("Image type (e.g. weakblur, strongblur, mediumcolor)")
+        img_type = _ask("Image type (图像类型)", DEFAULT_IMAGE_TYPE)
         plot_mode_a(dataset, img_type, prompt_n, out_file)
 
     else:  # Mode B
-        print("  Enter image types separated by commas,")
-        print("  e.g.: weakblur, strongblur, mediumcolor, original")
-        raw = _ask("Image types")
+        print("  多个图像类型用逗号分隔，例如: weakblur, strongblur, mediumcolor")
+        raw = _ask("Image types (图像类型列表)", DEFAULT_IMAGE_LIST)
         img_types = [t.strip() for t in raw.split(',') if t.strip()]
         if not img_types:
-            print("  ERROR: no image types provided"); return
+            print("  ERROR: 未提供任何图像类型"); return
         plot_mode_b(dataset, img_types, prompt_n, out_file)
 
 
