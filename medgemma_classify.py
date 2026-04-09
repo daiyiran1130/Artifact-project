@@ -64,9 +64,7 @@ OCT_PROMPT_3 = (
     'Describe your reasoning in steps.'
 )
 
-OCT_PROMPTS    = {1: OCT_PROMPT_1, 2: OCT_PROMPT_2, 3: OCT_PROMPT_3}
-# Prompt 3 需要更长的输出（推理链），其余限制 token 数以加速
-MAX_NEW_TOKENS = {1: 100, 2: 100, 3: 512}
+OCT_PROMPTS = {1: OCT_PROMPT_1, 2: OCT_PROMPT_2, 3: OCT_PROMPT_3}
 
 
 # ── 标签加载 ──────────────────────────────────────────────────────────────
@@ -89,8 +87,8 @@ def extract_number(filename: str):
     return int(match.group()) if match else None
 
 
-def query_model(image_path: Path, prompt: str, max_new_tokens: int = 100) -> str:
-    """对单张图片调用本地 MedGemma 模型，返回原始输出文本。"""
+def query_model(image_path: Path, prompt: str) -> str:
+    """对单张图片调用本地 MedGemma 模型，返回完整原始输出文本（不限制 token 数）。"""
     image = Image.open(image_path).convert('RGB')
     messages = [
         {
@@ -114,7 +112,6 @@ def query_model(image_path: Path, prompt: str, max_new_tokens: int = 100) -> str
     with torch.inference_mode():
         generation = model.generate(
             **inputs,
-            max_new_tokens=max_new_tokens,
             do_sample=False,
         )
 
@@ -261,7 +258,6 @@ def main():
 
         # 每种提示词的预测结果存入独立文件，命名与 gpt_classify.py 一致
         pred_file   = IMAGE_DIR / f'{prompt_idx}_oct_original.json'
-        max_tokens  = MAX_NEW_TOKENS[prompt_idx]
         predictions = {}
         total       = len(numbered)
 
@@ -271,7 +267,7 @@ def main():
             key = str(num)
             print(f'  [{idx}/{total}] {img_path.name} ...', end=' ', flush=True)
             try:
-                raw              = query_model(img_path, prompt, max_tokens)
+                raw              = query_model(img_path, prompt)
                 predictions[key] = raw
                 preview          = raw[:120].replace('\n', ' ')
                 print(f'-> {preview}{"..." if len(raw) > 120 else ""}')
