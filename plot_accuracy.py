@@ -87,6 +87,9 @@ DEFAULT_PROMPT     = "1"             # 提示词编号：填 "1"、"2"、"3" 等
 DEFAULT_IMAGE_TYPE = "weakblur"       # 【仅 Mode A 用】图像类型，例如 "weakblur"、"strongblur"
 DEFAULT_IMAGE_LIST = "weakblur, strongblur, mediumcolor, original"
 #                                     # 【仅 Mode B 用】多个图像类型，逗号分隔
+DEFAULT_ORIG_TYPE  = "original"       # 【仅 Mode C 用】基准图像类型（变化率的分母）
+DEFAULT_COMP_LIST  = "weakblur, strongblur, mediumcolor"
+#                                     # 【仅 Mode C 用】要与 original 比较的图像类型列表
 DEFAULT_OUTPUT     = ""              # 输出文件路径，留空则自动命名
 # ----------------------------------------------------------------
 
@@ -724,6 +727,204 @@ def plot_mode_b(dataset_type: str, image_types: list, prompt_num: str,
 
 
 # ================================================================
+# MODE C — 变化率柱状图  (acc(type) - acc(original))
+# ================================================================
+
+def paired_bootstrap_ci(correct_type: dict, correct_orig: dict):
+    """
+    配对 bootstrap CI：在相同图像 ID 上同时重采样，计算
+    acc(type) - acc(orig) 的 95% CI。
+    Returns (change, ci_low, ci_high).
+    """
+    common   = sorted(set(correct_type) & set(correct_orig))
+    arr_type = np.array([correct_type[k] for k in common], dtype=float)
+    arr_orig = np.array([correct_orig[k] for k in common], dtype=float)
+
+    change = arr_type.mean() - arr_orig.mean()
+
+    rng  = np.random.default_rng(RANDOM_SEED)
+    boot = np.empty(N_BOOTSTRAP)
+    for i in range(N_BOOTSTRAP):
+        idx      = rng.integers(0, len(common), size=len(common))
+        boot[i]  = arr_type[idx].mean() - arr_orig[idx].mean()
+
+    alpha   = 1.0 - CI_LEVEL
+    ci_low  = float(np.percentile(boot, 100 * alpha / 2))
+    ci_high = float(np.percentile(boot, 100 * (1 - alpha / 2)))
+    return change, ci_low, ci_high
+
+
+def plot_mode_c(dataset_type: str, orig_type: str, comp_types: list,
+                prompt_num: str, output_path: str = None):
+    """
+    Mode C: 变化率柱状图。
+    X 轴 = 比较图像类型（非 original），每组 4 个模型柱子，
+    高度 = acc(type, model) - acc(original, model)。
+    Y 轴以 0 为中心，刻度 -0.4/-0.2/0/0.2/0.4。
+    """
+    print(f"\n{'='*58}")
+    print(f"  [Mode C]  dataset={dataset_type}  prompt={prompt_num}")
+    print(f"  Baseline: {orig_type}  vs  {comp_types}")
+    print(f"{'='*58}")
+
+    gt         = load_ground_truth(dataset_type)
+    all_models = list(MODEL_NAMES.keys())
+    n_models   = len(all_models)
+    pairs      = list(combinations(range(n_models), 2))
+
+    # ── 加载 original 基准 ────────────────────────────────────────
+    print(f"\n  Loading baseline ({orig_type})…")
+    orig_files = find_json_files(dataset_type, orig_type, prompt_num)
+    orig_correct: dict = {}          # {model: {img_id: 0/1}}
+    for model, fpath in orig_files.items():
+        preds = load_json_results(fpath, dataset_type)
+        orig_correct[model] = per_sample_correctness(preds, gt)
+
+    # ── 加载对比图像类型 + 计算变化率 ────────────────────────────
+    # all_res[img_type][model] = {change, ci_lo, ci_hi, correct_type}
+    all_res: dict = {}
+    for img_type in comp_types:
+        print(f"\n  Image type: {img_type}")
+        json_files = find_json_files(dataset_type, img_type, prompt_num)
+        group: dict = {}
+        for model in all_models:
+            if model not in json_files or model not in orig_correct:
+                continue
+            preds   = load_json_results(json_files[model], dataset_type)
+            cor_t   = per_sample_correctness(preds, gt)
+            change, ci_lo, ci_hi = paired_bootstrap_ci(cor_t, orig_correct[model])
+            group[model] = dict(correct=cor_t, change=change,
+                                ci_lo=ci_lo, ci_hi=ci_hi)
+            print(f"    {MODEL_NAMES[model]:12s}  Δacc={change:+.4f}  "
+                  f"CI=[{ci_lo:+.4f},{ci_hi:+.4f}]")
+        all_res[img_type] = group
+
+    # ── 两两 McNemar（Bonferroni，基于 image_type 准确率）────────
+    n_total_tests = len(comp_types) * len(pairs)
+    pstats: dict  = {}
+    print("\n  Pairwise McNemar tests (Bonferroni across all groups):")
+    for img_type in comp_types:
+        for i, j in pairs:
+            m1, m2 = all_models[i], all_models[j]
+            if m1 not in all_res[img_type] or m2 not in all_res[img_type]:
+                continue
+            c1d    = all_res[img_type][m1]['correct']
+            c2d    = all_res[img_type][m2]['correct']
+            common = sorted(set(c1d) & set(c2d))
+            c1     = np.array([c1d[k] for k in common])
+            c2     = np.array([c2d[k] for k in common])
+            p_raw  = mcnemar_test(c1, c2)
+            lab, p_adj = sig_label(p_raw, n_tests=n_total_tests)
+            pstats[(img_type, i, j)] = dict(sig=lab, p_raw=p_raw, p_adj=p_adj)
+            if lab != 'ns':
+                print(f"    [{img_type}] {MODEL_NAMES[m1]:12s} vs "
+                      f"{MODEL_NAMES[m2]:12s}  "
+                      f"p={p_raw:.4f}  p_adj={p_adj:.4f}  {lab}")
+
+    # ── Figure layout（与 Mode B 相同参数）──────────────────────
+    n_groups   = len(comp_types)
+    bar_width  = 0.12
+    group_gap  = 0.22
+    inner_span = n_models * bar_width
+    group_step = inner_span + group_gap
+    offsets    = np.array([(k - (n_models - 1) / 2) * bar_width
+                           for k in range(n_models)])
+    group_centers = np.arange(n_groups) * group_step
+
+    fig_width = max(FIGURE_SIZE[0], n_groups * 1.8)
+    fig, ax   = plt.subplots(figsize=(fig_width, FIGURE_SIZE[1]), dpi=FIGURE_DPI)
+    fig.patch.set_facecolor('white')
+    ax.set_facecolor('#FAFAFA')
+
+    # ── 画柱子 ───────────────────────────────────────────────────
+    max_abs_ci = 0.0
+    for g_idx, img_type in enumerate(comp_types):
+        for m_idx, model in enumerate(all_models):
+            if model not in all_res.get(img_type, {}):
+                continue
+            r      = all_res[img_type][model]
+            xc     = group_centers[g_idx] + offsets[m_idx]
+            change = r['change']
+            err_dn = change - r['ci_lo']
+            err_up = r['ci_hi'] - change
+            max_abs_ci = max(max_abs_ci, abs(r['ci_lo']), abs(r['ci_hi']))
+
+            ax.bar(xc, change, width=bar_width * 0.88,
+                   color=MODEL_COLORS.get(model, '#888888'),
+                   alpha=0.90, edgecolor='none', zorder=3)
+            ax.errorbar(xc, change,
+                        yerr=[[err_dn], [err_up]],
+                        fmt='none', ecolor='#111111',
+                        elinewidth=0.7, capsize=2, capthick=0.7, zorder=4)
+
+    # ── 显著性括号（只画非 ***，同 Mode B）──────────────────────
+    BRACKET_H   = 0.013
+    BRACKET_GAP = 0.065
+    # 括号画在正值方向上方（或最高 CI 上方）
+    y_bracket_base = max(max_abs_ci + 0.04, 0.04)
+
+    max_level = 0
+    for g_idx, img_type in enumerate(comp_types):
+        to_draw = sorted(
+            [(group_centers[g_idx] + offsets[i],
+              group_centers[g_idx] + offsets[j],
+              pstats[(img_type, i, j)]['sig'])
+             for (i, j) in pairs
+             if (img_type, i, j) in pstats
+             and pstats[(img_type, i, j)]['sig'] != '***'],
+            key=lambda t: t[1] - t[0]
+        )
+        lvls = _no_overlap_levels(to_draw)
+        for (bx1, bx2, sig), lvl in zip(to_draw, lvls):
+            _draw_bracket(ax, bx1, bx2,
+                          y_bracket_base + lvl * BRACKET_GAP,
+                          BRACKET_H, sig, fontsize=4.5)
+        if lvls:
+            max_level = max(max_level, max(lvls))
+
+    # ── 0 基准线 ─────────────────────────────────────────────────
+    ax.axhline(0, color='#555555', linewidth=0.8, zorder=2)
+
+    # ── Axes ─────────────────────────────────────────────────────
+    ax.set_xticks(group_centers)
+    _prefixes = ('weak', 'medium', 'strong', 'original')
+    short_labels = []
+    for t in comp_types:
+        label = t
+        for p in _prefixes:
+            if t.lower().startswith(p):
+                label = t[len(p):] or t
+                break
+        short_labels.append(label)
+    ax.set_xticklabels(short_labels)
+    ax.set_xlim(group_centers[0] - group_step * 0.55,
+                group_centers[-1] + group_step * 0.55)
+
+    # Y 轴：以 0 为中心，固定刻度，上下各留空间给括号和负 CI
+    y_top = y_bracket_base + (max_level + 1) * BRACKET_GAP + 0.04
+    y_top = max(y_top, 0.50)
+    y_bot = min(-max_abs_ci - 0.04, -0.50)
+    ax.set_ylim(y_bot, y_top)
+    ax.set_yticks([-0.4, -0.2, 0, 0.2, 0.4])
+    ax.yaxis.set_major_formatter(plt.FuncFormatter(lambda v, _: f'{v:+.2f}'))
+
+    ax.tick_params(axis='y', labelsize=8)
+    ax.tick_params(axis='x', labelsize=8, length=0)
+    ax.spines['top'].set_visible(False)
+    ax.spines['right'].set_visible(False)
+    ax.spines['left'].set_alpha(0.5)
+    ax.spines['bottom'].set_visible(False)   # 用 axhline 代替底边框
+
+    plt.tight_layout()
+
+    if output_path is None:
+        comp_str = '_'.join(comp_types)
+        fname = f"chart_C_{dataset_type}_{comp_str}_vs_{orig_type}_prompt{prompt_num}.png"
+        output_path = os.path.join(OUTPUT_DIR, fname) if OUTPUT_DIR else fname
+    _save_and_open(fig, output_path)
+
+
+# ================================================================
 # MAIN — interactive CLI
 # ================================================================
 
@@ -743,16 +944,16 @@ def main():
     print()
     print("  Chart modes:")
     print("    A — 横轴是模型      (4 根柱子，1 种图像类型)")
-    print("    B — 横轴是图像类型  (N 组 × 4 模型柱子)")
+    print("    B — 横轴是图像类型  (N 组 × 4 模型柱子，绝对准确率)")
+    print("    C — 横轴是图像类型  (N 组 × 4 模型柱子，相对 original 的变化率)")
     print()
     print("  直接回车使用方括号里的默认值；")
     print("  默认值在脚本顶部 DEFAULT_* 变量处修改。")
     print()
 
-    # ── 各项输入（括号内显示当前默认值）──────────────────────────
-    mode = _ask("Mode (A / B)", DEFAULT_MODE).upper()
-    if mode not in ('A', 'B'):
-        print("  ERROR: 只能填 A 或 B"); return
+    mode = _ask("Mode (A / B / C)", DEFAULT_MODE).upper()
+    if mode not in ('A', 'B', 'C'):
+        print("  ERROR: 只能填 A、B 或 C"); return
 
     dataset = _ask("Dataset type (fundus / oct)", DEFAULT_DATASET).lower()
     if dataset not in CSV_PATHS:
@@ -765,13 +966,22 @@ def main():
         img_type = _ask("Image type (图像类型)", DEFAULT_IMAGE_TYPE)
         plot_mode_a(dataset, img_type, prompt_n, out_file)
 
-    else:  # Mode B
+    elif mode == 'B':
         print("  多个图像类型用逗号分隔，例如: weakblur, strongblur, mediumcolor")
         raw = _ask("Image types (图像类型列表)", DEFAULT_IMAGE_LIST)
         img_types = [t.strip() for t in raw.split(',') if t.strip()]
         if not img_types:
             print("  ERROR: 未提供任何图像类型"); return
         plot_mode_b(dataset, img_types, prompt_n, out_file)
+
+    else:  # Mode C
+        orig = _ask("Baseline image type (基准类型，如 original)", DEFAULT_ORIG_TYPE)
+        print("  比较图像类型用逗号分隔，例如: weakblur, strongblur, mediumcolor")
+        raw  = _ask("Comparison image types (对比类型列表)", DEFAULT_COMP_LIST)
+        comp_types = [t.strip() for t in raw.split(',') if t.strip()]
+        if not comp_types:
+            print("  ERROR: 未提供任何对比图像类型"); return
+        plot_mode_c(dataset, orig, comp_types, prompt_n, out_file)
 
 
 if __name__ == "__main__":
